@@ -980,6 +980,17 @@ git commit -m "docs: record Phase 1 walking-skeleton end-to-end results"
 - 单测(Models/Store/Converter)全绿。
 - 授权/装包缺失时有可读引导,不崩。
 
+## 终审遗留(Phase 1 全量复审,已评估为不阻塞;Phase 2 处理)
+
+已在复审后修掉:FormatConverter 复用饿死(commit fc6d6d7)、屏幕录制拒绝静默吞掉(fc6d6d7)。以下留到 Phase 2:
+
+- **翻译 Task 未跟踪/未取消**(`CaptionEngine.swift:27` 的 `Task { … translate }`):stop() 只取消外层 task,在途翻译仍会跑完并回写 store。attach-by-id 安全,单轨量小无害;Phase 2 加"我"轨、量上来前收进受管集合并在 stop 时取消。
+- **consume/results 读取 task 仅靠流终止间接取消**(`CaptionEngine.swift:23`、`TranscriptionPipeline.swift`):依赖 stop() 调 source.stop()/pipeline.stop() 让流 finish;若 `finalizeAndFinishThroughEndOfInput()` 卡住/抛错(当前被 try? 吞),两个 task 会泄漏。Phase 2 改为结构化子任务让取消直接传播。
+- **`@unchecked Sendable` 的 continuation/stream 属性无同步**(`SystemAudioSource.swift`):写在 MainActor、读/finish 在音频队列与 stop()。Continuation 本身线程安全,写一次先于捕获的时序当前成立;Phase 2 加第二个 source 前上锁并补注 `@unchecked` 理由。
+- **Minor**:`AudioFrame.hostTime` 目前无人读(Phase 2 同步再定去留);`SubtitleStore.lines` 无上限(长会话内存,Phase 3 环形缓冲);overlay 宽度 900 三处硬编码待抽常量;`fed` var 捕获告警(闭包同步执行,安全,可消告警)。
+
+> 待验证(需 Task 10 运行确认):直接构造的 `TranslationSession`(非 `.translationTask` 环境)在视图生命周期外调用 `translate()` 是否真出译文。若线上静默无输出,是 Phase 1 的真 bug,需回到 TranslationService 调整。
+
 ## 后续计划(各自独立 plan)
 
 - **Phase 2**:MicSource(我)+ VoiceProcessing、双轨并行、「我/对方」双色、中间态防闪烁细化。
