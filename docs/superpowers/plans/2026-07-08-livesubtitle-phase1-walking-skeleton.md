@@ -6,7 +6,13 @@
 
 **Architecture:** 单向数据流。`SystemAudioSource`(ScreenCaptureKit)产出 `AudioFrame`,经 `FormatConverter` 转成 analyzer 要求的 16kHz/Int16/单声道,喂给 `TranscriptionPipeline`(SpeechAnalyzer + SpeechTranscriber,开 `.fastResults`),终句触发 `TranslationService`(headless TranslationSession),结果写入 `@MainActor @Observable SubtitleStore`,`SubtitleBarView`(SwiftUI,承载于 `.nonactivating` NSPanel)订阅渲染。全 Swift Concurrency(actor + AsyncStream + Task)。
 
-**Tech Stack:** Swift 6.2 · macOS 26 SDK · Xcode · SwiftUI + AppKit(NSPanel/MenuBarExtra)· Speech(SpeechAnalyzer)· Translation(TranslationSession)· ScreenCaptureKit · AVFoundation · XCTest。
+**Tech Stack:** Swift 6.2 · macOS 26 SDK · **SwiftPM**(非 xcodeproj)· SwiftUI + AppKit(NSPanel/MenuBarExtra)· Speech(SpeechAnalyzer)· Translation(TranslationSession)· ScreenCaptureKit · AVFoundation · XCTest。
+
+> **构建系统 = SwiftPM(2026-07-08 拍板,已验证)。** 单一 `executableTarget: LiveSubtitle` + `testTarget` 用 `@testable import LiveSubtitle`(实测可测可执行 target,内部类型无需 public)。命令映射:
+> - `xcodebuild ... build` → **`swift build`**
+> - `xcodebuild test ... -only-testing:LiveSubtitleTests/X` → **`swift test --filter X`**
+> - 运行 GUI app(需 .app bundle 拿 TCC)→ **`bash scripts/build-app.sh && open build/LiveSubtitle.app`**
+> - 源码放 `Sources/LiveSubtitle/<Group>/*.swift`;测试放 `Tests/LiveSubtitleTests/*.swift`。
 
 **Phase 1 明确不做**(留后续计划):麦克风轨(我)、双轨并行、小窗模式、历史滚动、显示三态切换、Pin、透明度/字号/拖拽、回声消除。Phase 1 固定:单系统声轨、显示恒为"原文+译文"、字幕条一种浮窗。
 
@@ -54,7 +60,11 @@ LiveSubtitleTests/
 
 ---
 
-## Task 0: 工程脚手架
+## Task 0: 工程脚手架 · ✅ 已完成(2026-07-08,SwiftPM)
+
+已由控制器直接完成:`git init` + 首提交、`Package.swift`(executable + test target)、`Sources/LiveSubtitle/main.swift` 占位、`Tests/LiveSubtitleTests/SmokeTests.swift`、`scripts/build-app.sh`(打 .app + Info.plist:LSUIElement / NSScreenCaptureUsageDescription / NSMicrophoneUsageDescription)。`swift build`、`swift test`、`build-app.sh` 均验证通过。**Task 9 用 `LiveSubtitleApp.swift`(@main)替换并删除 `main.swift`。**
+
+<details><summary>原 xcodeproj 版脚手架步骤(已作废,保留备查)</summary>
 
 **Files:**
 - Create: `LiveSubtitle.xcodeproj`(Xcode GUI 生成)
@@ -111,6 +121,8 @@ Expected: `** BUILD SUCCEEDED **`
 git add LiveSubtitle LiveSubtitle.xcodeproj LiveSubtitleTests
 git commit -m "chore: scaffold LiveSubtitle macOS app + test target"
 ```
+
+</details>
 
 ---
 
