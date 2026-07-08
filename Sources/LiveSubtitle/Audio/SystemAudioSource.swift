@@ -33,6 +33,7 @@ final class SystemAudioSource: NSObject, AudioSource, SCStreamOutput, SCStreamDe
             try await s.startCapture()
             stream = s
         } catch {
+            print("[SystemAudioSource] start failed: \(error) — 检查『屏幕录制』授权")
             continuation?.finish()
         }
     }
@@ -58,8 +59,9 @@ final class SystemAudioSource: NSObject, AudioSource, SCStreamOutput, SCStreamDe
         let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(sb))
         guard frames > 0, let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: frames) else { return nil }
         buf.frameLength = frames
-        CMSampleBufferCopyPCMDataIntoAudioBufferList(sb, at: 0, frameCount: Int32(frames),
-                                                     into: buf.mutableAudioBufferList)
+        let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(sb, at: 0, frameCount: Int32(frames),
+                                                                  into: buf.mutableAudioBufferList)
+        guard status == noErr else { return nil }
         return buf
     }
 }
