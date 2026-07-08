@@ -24,6 +24,17 @@ final class FormatConverterTests: XCTestCase {
         XCTAssertTrue(out.contains { $0 != 0 })                 // 非静音
     }
 
+    /// 复用同一实例连续转换多段:实时链路每个 SCStream buffer 调一次 convert,
+    /// 若转换器停在上次 .endOfStream 终态,第二段起会返回空/静音 → 首句后再无字幕。
+    func testReuseAcrossMultipleBuffersStillProducesAudio() throws {
+        let conv = FormatConverter()
+        for _ in 0..<3 {
+            let out = try conv.convert(makeSource(seconds: 0.5))
+            XCTAssertEqual(Double(out.count), 8000, accuracy: 64)
+            XCTAssertTrue(out.contains { $0 != 0 }, "复用后仍应输出非静音音频")
+        }
+    }
+
     func testTargetFormatIs16kInt16Mono() {
         let conv = FormatConverter()
         XCTAssertEqual(conv.targetFormat.sampleRate, 16000)

@@ -6,6 +6,8 @@ import CoreMedia
 /// 用 ScreenCaptureKit 采集系统输出音频(纯系统声,不含麦克风)。
 final class SystemAudioSource: NSObject, AudioSource, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     let speaker: Speaker = .other
+    /// 采集启动失败(多为未授权『屏幕录制』)时上报;由 CaptionEngine 接到 UI。
+    var onError: (@Sendable (String) -> Void)?
     private let converter = FormatConverter()
     private var stream: SCStream?
     private var continuation: AsyncStream<AudioFrame>.Continuation?
@@ -20,7 +22,9 @@ final class SystemAudioSource: NSObject, AudioSource, SCStreamOutput, SCStreamDe
     private func start() async {
         do {
             let content = try await SCShareableContent.current
-            guard let display = content.displays.first else { continuation?.finish(); return }
+            guard let display = content.displays.first else {
+                onError?("未找到可采集的显示器"); continuation?.finish(); return
+            }
             let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
             let config = SCStreamConfiguration()
             config.capturesAudio = true
@@ -33,7 +37,7 @@ final class SystemAudioSource: NSObject, AudioSource, SCStreamOutput, SCStreamDe
             try await s.startCapture()
             stream = s
         } catch {
-            print("[SystemAudioSource] start failed: \(error) — 检查『屏幕录制』授权")
+            onError?("系统音频采集失败:\(error.localizedDescription) — 请在 系统设置→隐私与安全性→屏幕录制 授权 LiveSubtitle")
             continuation?.finish()
         }
     }

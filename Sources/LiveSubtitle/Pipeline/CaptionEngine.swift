@@ -12,6 +12,8 @@ final class CaptionEngine {
 
     /// 启动整条链路。授权/装包错误通过 onError 回调上报。
     func start(onError: @escaping @MainActor (String) -> Void) {
+        // 采集侧(SCStream 队列/后台 Task)报错 → 跳回主线程上报 UI。
+        source.onError = { msg in Task { @MainActor in onError(msg) } }
         tasks.append(Task {
             do {
                 try await pipeline.ensureModel()

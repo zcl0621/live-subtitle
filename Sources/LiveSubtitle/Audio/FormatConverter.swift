@@ -22,6 +22,9 @@ final class FormatConverter {
         }
         var fed = false
         var err: NSError?
+        // 每个输入 buffer 当作一段独立完整流:上一次 .endOfStream 会让转换器停在终态,
+        // 不 reset 则后续 buffer 立即返回 .endOfStream / 0 帧(只有首个 buffer 出声)。
+        converter!.reset()
         converter!.convert(to: out, error: &err) { _, status in
             if fed { status.pointee = .endOfStream; return nil }
             fed = true; status.pointee = .haveData; return input
