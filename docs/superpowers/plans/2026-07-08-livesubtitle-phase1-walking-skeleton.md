@@ -991,6 +991,20 @@ git commit -m "docs: record Phase 1 walking-skeleton end-to-end results"
 
 > 待验证(需 Task 10 运行确认):直接构造的 `TranslationSession`(非 `.translationTask` 环境)在视图生命周期外调用 `translate()` 是否真出译文。若线上静默无输出,是 Phase 1 的真 bug,需回到 TranslationService 调整。
 
+## Task 10 实测结果(2026-07-09,部分通过)
+
+在真机跑了端到端。**结论:链路能通,但未达 DoD,有两个未定位的运行时缺陷。**
+
+- ✅ 修 FormatConverter 复用饿死(fc6d6d7)后,系统音频**确实能出字幕**了(修复前:第一句后哑掉 → 无字幕)。证实 C1 是真 bug 且已生效。
+- ❌ **卡住**:出了没几句(约 2 句)后字幕停止刷新,不再更新。
+- ❌ **识别/内容错乱**:出来的字幕"牛头不对马嘴",与实际英文语音对不上。
+
+**根因未查**(用户 2026-07-09 选择先不深挖、继续推进)。两个疑似方向,待回来时验证:
+1. "卡住":音频喂入流(`inputCont.yield`)或 SpeechAnalyzer 在连续喂入下停摆;也可能 AsyncStream `.bufferingNewest(32)` 丢帧 / 背压。
+2. "错乱":`FormatConverter` 改成"每 buffer 单独 reset 重采样"后,小 buffer 的采样率转换有滤波瞬态 → 音频瑕疵 → STT 乱识别;或 CMSampleBuffer→AVAudioPCMBuffer 的 48k/2ch 格式/交织处理有误。排障入口:给各环节边界插 `NSLog("[LS] …")`,`open` 启动后用 `log show --predicate 'eventMessage CONTAINS "[LS]"'` 取回,看喂帧数 / STT 原始输出 / 在哪步停。
+
+> **Phase 1 DoD 未满足**("连续、准确"这条没达到)。Phase 2 加麦克风轨前应先把这两个搞定,否则会踩同一坑。
+
 ## 后续计划(各自独立 plan)
 
 - **Phase 2**:MicSource(我)+ VoiceProcessing、双轨并行、「我/对方」双色、中间态防闪烁细化。
