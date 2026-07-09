@@ -3,8 +3,7 @@ import Foundation
 @MainActor
 final class CaptionEngine {
     let store: SubtitleStore
-    private let translator = TranslationService()
-    private struct Track { let source: AudioSource; let pipeline: TranscriptionPipeline }
+    private struct Track { let source: AudioSource; let pipeline: TranscriptionPipeline; let translator: TranslationService }
     private var tracks: [Track]
     private var tasks: [Task<Void, Never>] = []
     private var flushTask: Task<Void, Never>?
@@ -16,14 +15,16 @@ final class CaptionEngine {
             (SystemAudioSource(), TranscriptionPipeline()),
             (MicSource(), TranscriptionPipeline()),
         ]
-        self.tracks = built.map { Track(source: $0.0, pipeline: $0.1) }
+        self.tracks = built.map { Track(source: $0.0, pipeline: $0.1, translator: TranslationService()) }
     }
 
     func start(onError: @escaping @MainActor (String) -> Void) {
-        // 翻译服务共享,暖机一次(失败=中文包未装)
+        // 每轨独立翻译服务,逐一暖机;中文包未装只报一次(失败即停,不刷屏)
         tasks.append(Task {
-            do { try await translator.warmUp() }
-            catch { onError("请在 系统设置→通用→语言与地区→翻译语言 安装 中文(简体)") }
+            for track in tracks {
+                do { try await track.translator.warmUp() }
+                catch { onError("请在 系统设置→通用→语言与地区→翻译语言 安装 中文(简体)"); break }
+            }
         })
         // 每条轨:接 onError → ensureModel → start → 消费 + 喂
         for track in tracks {
@@ -37,7 +38,7 @@ final class CaptionEngine {
                             if e.isFinal {
                                 let id = store.commitFinal(speaker: track.source.speaker, text: e.text)
                                 Task { @MainActor in
-                                    if let zh = await translator.translate(e.text) {
+                                    if let zh = await track.translator.translate(e.text) {
                                         store.attachTranslation(id: id, zh: zh)
                                     }
                                 }
@@ -68,6 +69,14 @@ final class CaptionEngine {
         flushTask?.cancel(); flushTask = nil
         tasks.forEach { $0.cancel() }; tasks = []
         let tracks = self.tracks
-        Task { for t in tracks { await t.source.stop(); await t.pipeline.stop() } }
+        // 先并发停所有采集源(麦克风立即停录),再并发收尾所有 pipeline
+        Task {
+            await withTaskGroup(of: Void.self) { g in
+                for t in tracks { g.addTask { await t.source.stop() } }
+            }
+            await withTaskGroup(of: Void.self) { g in
+                for t in tracks { g.addTask { await t.pipeline.stop() } }
+            }
+        }
     }
 }
