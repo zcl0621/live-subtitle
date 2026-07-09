@@ -191,6 +191,15 @@
 - MicSource 直接实现 `setVoiceProcessingEnabled(true)`(Task 1),AEC 效力在 **Task 5 端到端手测**里验(那步本就要麦克风+屏录授权)。
 - 失败预案已在 spec:外放 AEC 不足 → 耳机兜底 / 提示。此预案不改 Task 1-4 的代码结构,故**代码任务可先推进**。
 
+## Phase 2 端到端(2026-07-09)
+
+真机测双轨:
+- ✅ **对方轨**(系统音):正常出英文原文 + 中文(橙)。
+- ✅ **我轨**(麦克风):修 ch0 bug 后正常出真实英文 + 中文(蓝)。日志实测 `outPeak` 700–4600、`event[me]` 出连续英文终句。
+  - **踩坑 & 修复(commit dd58a9e):** VoiceProcessing 的麦克风输入是**多声道**(实测 7、9 路,数量每次还变 = mic + 参考/AEC 声道)。`FormatConverter` 的 `AVAudioConverter` 整组下混到单声道 → **全静音**(outPeak=0),尽管 ch0 有健康人声(ch0peak 0.02–0.31)。改成**显式取 0 声道**(即 AEC 处理后的近端麦克风)再转换后正常。诊断用 `probes/p3c_mic_format.swift` + 临时文件日志定位。
+- ⏳ **AEC 效力(P3b 折入)**:未单独压测(外放时对方漏音是否被误当「我」)。取 ch0 = VoiceProcessing 已处理的近端信号,理论上 AEC 已在其中;需要时可专门验一次,失败走耳机兜底。
+- ⏳ 防闪烁 / 干净停止:未单独确认。
+
 ## 免权限探针小结(2026-07-07)
 
 **能在 CLT/CLI 下验的 KILL 项全部跑完:**
