@@ -1,7 +1,9 @@
 import Foundation
 import AVFoundation
 
-/// 麦克风采集(=我),开 VoiceProcessing 回声消除,消掉外放漏进来的对方声。
+/// 麦克风采集(=我)。**不开 VoiceProcessing**:实测(与社区一致,见 probes/RESULTS.md)VP 会把输入
+/// 变多声道致静音、压低扬声器输出、还会掐 ScreenCaptureKit 的系统音轨,且并不能消掉别的 app 从扬声器
+/// 放出来的对方声。外放漏音靠耳机兜底(通话推荐戴耳机)。
 final class MicSource: NSObject, AudioSource, @unchecked Sendable {
     let speaker: Speaker = .me
     var onError: (@Sendable (String) -> Void)?
@@ -18,11 +20,6 @@ final class MicSource: NSObject, AudioSource, @unchecked Sendable {
 
     private func start() {
         let input = engine.inputNode
-        do {
-            try input.setVoiceProcessingEnabled(true)   // 开 AEC
-        } catch {
-            onError?("回声消除启用失败:\(error.localizedDescription)(外放可能串音,建议戴耳机)")
-        }
         let format = input.outputFormat(forBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buf, _ in
             guard let self, let mono = Self.channelZeroMono(buf),
@@ -43,8 +40,7 @@ final class MicSource: NSObject, AudioSource, @unchecked Sendable {
         continuation?.finish()
     }
 
-    /// 取 0 声道为单声道 buffer。VoiceProcessing 的输入是多声道(mic + 参考声道,数量还会变),
-    /// 直接让 AVAudioConverter 下混整组声道会得到全静音;0 声道即 AEC 处理后的近端麦克风。
+    /// 取 0 声道为单声道 buffer(兜底任意声道数;输入节点通常是 Float32 非交织)。
     private static func channelZeroMono(_ buf: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
         guard let src = buf.floatChannelData,
               let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32,
