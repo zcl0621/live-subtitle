@@ -11,9 +11,29 @@ struct LiveSubtitleApp: App {
 
     var body: some Scene {
         MenuBarExtra("LiveSubtitle", systemImage: "captions.bubble") {
+            @Bindable var s = store
             Button(running ? "停止字幕" : "开始字幕") { toggle() }
             if !status.isEmpty { Text(status).font(.caption) }
             Divider()
+
+            Picker("显示", selection: $s.displayMode) {
+                Text("原文").tag(DisplayMode.originalOnly)
+                Text("双语").tag(DisplayMode.both)
+                Text("译文").tag(DisplayMode.translatedOnly)
+            }
+            Picker("形态", selection: $s.overlayMode) {
+                Text("字幕条").tag(OverlayMode.bar)
+                Text("小窗").tag(OverlayMode.mini)
+            }
+            Toggle("置顶 Pin", isOn: $s.pinned)
+            Divider()
+
+            Text("透明度")
+            Slider(value: $s.opacity, in: 0.4...1.0)
+            Text("字号")
+            Slider(value: $s.fontSize, in: 16...32, step: 1)
+            Divider()
+
             Button("退出") { NSApplication.shared.terminate(nil) }
         }
     }
