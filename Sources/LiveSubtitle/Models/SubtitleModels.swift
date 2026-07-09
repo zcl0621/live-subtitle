@@ -1,8 +1,13 @@
 import Foundation
 
 enum Speaker: Sendable, Equatable { case me, other }        // 麦克风=me,系统声=other
-enum DisplayMode: Sendable { case originalOnly, both, translatedOnly }
-enum OverlayMode: Sendable { case bar, mini }
+enum DisplayMode: String, Sendable, CaseIterable { case originalOnly, both, translatedOnly }
+enum OverlayMode: String, Sendable, CaseIterable { case bar, mini }
+
+extension DisplayMode {
+    var showsOriginal: Bool { self != .translatedOnly }
+    var showsTranslated: Bool { self != .originalOnly }
+}
 
 /// 跨 actor 的 Sendable 音频载体(不直接传 AVAudioPCMBuffer,后者非 Sendable)。
 /// pcm 为已转换到 analyzer 目标格式(16k/Int16/单声道)的样本。
