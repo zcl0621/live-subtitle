@@ -23,9 +23,10 @@ final class MicSource: NSObject, AudioSource, @unchecked Sendable {
         } catch {
             onError?("回声消除启用失败:\(error.localizedDescription)(外放可能串音,建议戴耳机)")
         }
-        let format = input.outputFormat(forBus: 0)      // VP 下实测 24k/3ch/Float32
+        let format = input.outputFormat(forBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buf, _ in
-            guard let self, let samples = try? self.converter.convert(buf) else { return }
+            guard let self, let mono = Self.channelZeroMono(buf),
+                  let samples = try? self.converter.convert(mono) else { return }
             self.continuation?.yield(AudioFrame(pcm: samples, speaker: .me, hostTime: mach_absolute_time()))
         }
         engine.prepare()
@@ -40,5 +41,17 @@ final class MicSource: NSObject, AudioSource, @unchecked Sendable {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         continuation?.finish()
+    }
+
+    /// 取 0 声道为单声道 buffer。VoiceProcessing 的输入是多声道(mic + 参考声道,数量还会变),
+    /// 直接让 AVAudioConverter 下混整组声道会得到全静音;0 声道即 AEC 处理后的近端麦克风。
+    private static func channelZeroMono(_ buf: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let src = buf.floatChannelData,
+              let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                      sampleRate: buf.format.sampleRate, channels: 1, interleaved: false),
+              let out = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: buf.frameLength) else { return nil }
+        out.frameLength = buf.frameLength
+        out.floatChannelData![0].update(from: src[0], count: Int(buf.frameLength))
+        return out
     }
 }
