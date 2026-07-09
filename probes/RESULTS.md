@@ -178,6 +178,19 @@
 
 ---
 
+## P3a 双 SpeechAnalyzer 并发 — 活体复验(2026-07-09,Phase 2)
+
+`probes/p3a_dual_analyzer.swift`,喂 `/tmp/real_us.wav`(美)+ `/tmp/real_uk.wav`(英)到两个独立 `SpeechAnalyzer`(async let 并发):
+- A 终句=9,B 终句=10,内容均正确。
+- 并发耗时 **41.99s**(音频约 40s @1× 实时)→ 两路真并行,非串行(串行应 ~80s)。
+- **✅ GO:双轨方案的核心架构风险(两分析器并发)确认成立。** 与 Phase 0 的 P5a🟢 一致。
+
+## P3b VoiceProcessing AEC — 结论:改在 Task 5 端到端验(2026-07-09)
+
+按 Phase 0 已记事实,回声/AEC 需带 entitlements 的 .app bundle + 麦克风/屏录 TCC,**纯 CLI 探针测不了真实声学回声**。因此不单跑 headless p3b,改为:
+- MicSource 直接实现 `setVoiceProcessingEnabled(true)`(Task 1),AEC 效力在 **Task 5 端到端手测**里验(那步本就要麦克风+屏录授权)。
+- 失败预案已在 spec:外放 AEC 不足 → 耳机兜底 / 提示。此预案不改 Task 1-4 的代码结构,故**代码任务可先推进**。
+
 ## 免权限探针小结(2026-07-07)
 
 **能在 CLT/CLI 下验的 KILL 项全部跑完:**
