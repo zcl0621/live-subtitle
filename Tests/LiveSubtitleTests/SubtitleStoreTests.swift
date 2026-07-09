@@ -47,4 +47,32 @@ final class SubtitleStoreTests: XCTestCase {
         XCTAssertEqual(s.lines.first { $0.speaker == .other }?.original, "A2")
         XCTAssertEqual(s.lines.first { $0.speaker == .me }?.original, "B")
     }
+
+    func testStageVolatileDoesNotShowUntilFlush() {
+        let s = SubtitleStore()
+        s.stageVolatile(speaker: .other, text: "hel")
+        s.stageVolatile(speaker: .other, text: "hello wor")
+        XCTAssertTrue(s.lines.isEmpty)          // 未 flush 前不上屏
+        s.flushVolatile()
+        XCTAssertEqual(s.lines.count, 1)
+        XCTAssertEqual(s.lines[0].original, "hello wor")   // 合并:只留最后一次
+    }
+
+    func testFlushAppliesBothSpeakers() {
+        let s = SubtitleStore()
+        s.stageVolatile(speaker: .other, text: "hi there")
+        s.stageVolatile(speaker: .me, text: "yes ok")
+        s.flushVolatile()
+        XCTAssertEqual(Set(s.lines.map(\.speaker)), [.other, .me])
+    }
+
+    func testCommitFinalClearsStagedVolatileForSpeaker() {
+        let s = SubtitleStore()
+        s.stageVolatile(speaker: .other, text: "stale")
+        _ = s.commitFinal(speaker: .other, text: "final text")
+        s.flushVolatile()                        // 陈旧 volatile 不应再造一行
+        XCTAssertEqual(s.lines.count, 1)
+        XCTAssertEqual(s.lines[0].original, "final text")
+        XCTAssertTrue(s.lines[0].isFinal)
+    }
 }
