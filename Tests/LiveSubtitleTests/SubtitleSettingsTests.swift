@@ -46,6 +46,11 @@ final class SubtitleSettingsTests: XCTestCase {
         let suite = freshSuite()
         let s1 = SubtitleStore(defaults: suite)
         s1.layoutEditing = true
+        // 核心断言:瞬态属性【绝不落盘】——直接查底层 key 未被写入。
+        // (仅断言 s2.layoutEditing==false 是恒真的:init 无条件置 false,
+        //  即使误加了持久化 didSet 也照样通过,抓不到回归。)
+        XCTAssertNil(suite.object(forKey: "ls.layoutEditing"),
+                     "layoutEditing 不应写入 UserDefaults(瞬态语义被破坏)")
         let s2 = SubtitleStore(defaults: suite)
         XCTAssertFalse(s2.layoutEditing)
     }

@@ -8,22 +8,32 @@ final class OverlayController {
     private var moveObserver: NSObjectProtocol?
     private var resizeObserver: NSObjectProtocol?
     private let defaults = UserDefaults.standard
+    /// overlay 是否处于显示态。停止后为 false,阻止观察回调复活幽灵浮窗。
+    private var active = false
+    /// 观察代次:show/hide 时自增,使 hide 前武装的旧 withObservationTracking 回调失效(无法 cancel,只能靠代次作废)。
+    private var generation = 0
 
     func show(store: SubtitleStore) {
         self.store = store
+        active = true
+        generation &+= 1
         applyMode()
         observe()
     }
 
     func hide() {
+        active = false
+        generation &+= 1        // 作废任何已武装的观察回调
         removeMoveObserver()
         panel?.orderOut(nil)
         panel = nil
     }
 
     /// 观察 overlayMode / pinned / barWidth / layoutEditing,变化即重配并重新武装观察。
+    /// active==false(已停止)或代次过期时,回调直接 no-op,不再重建浮窗、不再重新武装。
     private func observe() {
-        guard let store else { return }
+        guard active, let store else { return }
+        let gen = generation
         withObservationTracking {
             _ = store.overlayMode
             _ = store.pinned
@@ -31,6 +41,7 @@ final class OverlayController {
             _ = store.layoutEditing
         } onChange: {
             Task { @MainActor in
+                guard self.active, gen == self.generation else { return }
                 self.applyMode()
                 self.observe()
             }
@@ -38,7 +49,7 @@ final class OverlayController {
     }
 
     private func applyMode() {
-        guard let store else { return }
+        guard active, let store else { return }
         removeMoveObserver()
         panel?.orderOut(nil)
         let p = (store.overlayMode == .bar) ? makeBarPanel(store) : makeMiniPanel(store)

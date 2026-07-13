@@ -9,6 +9,7 @@ struct LiveSubtitleApp: App {
     @State private var running = false
     @State private var status = ""
     @State private var exportStatus = ""
+    @State private var isExporting = false
 
     // 启动即请求权限(麦克风 + 屏幕录制)——用 AppDelegate 的 applicationDidFinishLaunching,
     // 而非菜单内容的 .task(后者要等用户点开菜单才触发)。
@@ -48,8 +49,12 @@ struct LiveSubtitleApp: App {
             Divider()
 
             Button("整理并导出到 Obsidian") { exportToObsidian() }
+                .disabled(isExporting)
             if !exportStatus.isEmpty { Text(exportStatus).font(.caption) }
-            Button("设置…") { openSettings() }
+            Button("设置…") {
+                NSApp.activate(ignoringOtherApps: true)   // 菜单栏触发时确保设置窗口置前获焦
+                openSettings()
+            }
             Divider()
 
             Button("退出") { NSApplication.shared.terminate(nil) }
@@ -62,10 +67,13 @@ struct LiveSubtitleApp: App {
     }
 
     @MainActor private func exportToObsidian() {
+        guard !isExporting else { return }   // 防重入:进行中不再并发触发(避免重复上云 + 竞争写盘)
+        isExporting = true
         exportStatus = "正在整理…"
         Task {
             let result = await ExportCoordinator.exportToObsidian(store: store)
             exportStatus = result
+            isExporting = false
         }
     }
 

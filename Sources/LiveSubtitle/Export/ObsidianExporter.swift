@@ -56,12 +56,24 @@ enum ObsidianExporter {
             throw ExportError.vaultNotFound(trimmedVault)
         }
 
-        let fileName = "\(fileDateString(note.date))-\(sanitize(note.title)).md"
-        let fileURL = vaultURL.appendingPathComponent(fileName, isDirectory: false)
+        let base = "\(fileDateString(note.date))-\(sanitize(note.title))"
+        let fileURL = uniqueFileURL(in: vaultURL, base: base)
 
         let content = fileContent(for: note)
         try content.write(to: fileURL, atomically: true, encoding: .utf8)
         return fileURL
+    }
+
+    /// 避免覆盖同名笔记:<base>.md 已存在则退到 <base>-2.md / -3.md …
+    private static func uniqueFileURL(in dir: URL, base: String) -> URL {
+        let fm = FileManager.default
+        var candidate = dir.appendingPathComponent("\(base).md", isDirectory: false)
+        var n = 2
+        while fm.fileExists(atPath: candidate.path) {
+            candidate = dir.appendingPathComponent("\(base)-\(n).md", isDirectory: false)
+            n += 1
+        }
+        return candidate
     }
 
     // MARK: - Helpers
@@ -120,14 +132,16 @@ enum ObsidianExporter {
         return out
     }
 
-    /// 对 YAML scalar 做最小转义:含特殊字符时用双引号包裹并转义内部引号/反斜杠。
+    /// title 一律用双引号包裹并完整转义(反斜杠/引号/换行/回车/制表符)。
+    /// 双引号 scalar 不会被 YAML 当成列表(- )、块(| >)、锚点(& *)、指示符(@ ` ! ?)等解析,
+    /// 也不会因内嵌换行断开 frontmatter,因此对 DeepSeek 返回的任意 title 都安全。
     private static func yamlScalar(_ value: String) -> String {
-        let needsQuoting = value.contains(where: { ":#\"'[]{}".contains($0) })
-            || value.hasPrefix(" ") || value.hasSuffix(" ")
-        guard needsQuoting else { return value }
         let escaped = value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
         return "\"\(escaped)\""
     }
 }
