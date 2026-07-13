@@ -8,9 +8,17 @@ struct LiveSubtitleApp: App {
     @State private var overlay = OverlayController()
     @State private var running = false
     @State private var status = ""
+    @State private var exportStatus = ""
+
+    // 启动即请求权限(麦克风 + 屏幕录制)——用 AppDelegate 的 applicationDidFinishLaunching,
+    // 而非菜单内容的 .task(后者要等用户点开菜单才触发)。
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
+    @Environment(\.openSettings) private var openSettings
 
     var body: some Scene {
         MenuBarExtra("LiveSubtitle", systemImage: "captions.bubble") {
+          Group {
             @Bindable var s = store
             Button(running ? "停止字幕" : "开始字幕") { toggle() }
             if !status.isEmpty { Text(status).font(.caption) }
@@ -34,7 +42,30 @@ struct LiveSubtitleApp: App {
             Slider(value: $s.fontSize, in: 16...32, step: 1)
             Divider()
 
+            Toggle("布局编辑(拖动字幕条)", isOn: $s.layoutEditing)
+            Text("字幕条宽度")
+            Slider(value: $s.barWidth, in: 600...1400, step: 20)
+            Divider()
+
+            Button("整理并导出到 Obsidian") { exportToObsidian() }
+            if !exportStatus.isEmpty { Text(exportStatus).font(.caption) }
+            Button("设置…") { openSettings() }
+            Divider()
+
             Button("退出") { NSApplication.shared.terminate(nil) }
+          }
+        }
+
+        Settings {
+            SettingsView(store: store)
+        }
+    }
+
+    @MainActor private func exportToObsidian() {
+        exportStatus = "正在整理…"
+        Task {
+            let result = await ExportCoordinator.exportToObsidian(store: store)
+            exportStatus = result
         }
     }
 
@@ -48,5 +79,12 @@ struct LiveSubtitleApp: App {
             e.start(onError: { status = $0 })
             running = true
         }
+    }
+}
+
+/// 启动即请求 麦克风 + 屏幕录制 授权(不等到点"开始字幕",也不等用户点开菜单)。
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        PermissionsManager.requestAllOnLaunch()
     }
 }
