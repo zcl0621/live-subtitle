@@ -19,7 +19,7 @@ struct MiniWindowView: View {
                 withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo("bottom", anchor: .bottom) }
             }
         }
-        .frame(width: 380, height: 480)
+        .frame(minWidth: 260, maxWidth: .infinity, minHeight: 180, maxHeight: .infinity)
         .background(.black.opacity(store.opacity), in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.12)))
     }

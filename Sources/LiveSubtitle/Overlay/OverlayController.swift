@@ -6,6 +6,7 @@ final class OverlayController {
     private var panel: NSPanel?
     private var store: SubtitleStore?
     private var moveObserver: NSObjectProtocol?
+    private var resizeObserver: NSObjectProtocol?
     private let defaults = UserDefaults.standard
 
     func show(store: SubtitleStore) {
@@ -80,15 +81,19 @@ final class OverlayController {
     }
 
     private func makeMiniPanel(_ store: SubtitleStore) -> NSPanel {
+        let w = defaults.object(forKey: "ls.miniW") as? Double ?? 380
+        let h = defaults.object(forKey: "ls.miniH") as? Double ?? 480
         let host = NSHostingView(rootView: MiniWindowView(store: store))
-        host.frame = NSRect(x: 0, y: 0, width: 380, height: 480)
-        let p = NSPanel(contentRect: host.frame, styleMask: [.nonactivatingPanel, .borderless],
+        host.frame = NSRect(x: 0, y: 0, width: w, height: h)
+        host.autoresizingMask = [.width, .height]     // 内容随 panel 缩放
+        let p = NSPanel(contentRect: host.frame, styleMask: [.nonactivatingPanel, .borderless, .resizable],
                         backing: .buffered, defer: false)
         p.isFloatingPanel = true
         p.backgroundColor = .clear
         p.isOpaque = false
         p.hasShadow = true
-        p.isMovableByWindowBackground = true         // 小窗可拖
+        p.isMovableByWindowBackground = true          // 小窗可拖(边缘仍可缩放)
+        p.minSize = NSSize(width: 260, height: 180)    // 缩放下限
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         p.contentView = host
         if let x = defaults.object(forKey: "ls.miniX") as? Double,
@@ -106,10 +111,19 @@ final class OverlayController {
                 self.defaults.set(Double(origin.y), forKey: "ls.miniY")
             }
         }
+        resizeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResizeNotification, object: p, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let size = self.panel?.frame.size else { return }
+                self.defaults.set(Double(size.width), forKey: "ls.miniW")
+                self.defaults.set(Double(size.height), forKey: "ls.miniH")
+            }
+        }
         return p
     }
 
     private func removeMoveObserver() {
         if let o = moveObserver { NotificationCenter.default.removeObserver(o); moveObserver = nil }
+        if let o = resizeObserver { NotificationCenter.default.removeObserver(o); resizeObserver = nil }
     }
 }
