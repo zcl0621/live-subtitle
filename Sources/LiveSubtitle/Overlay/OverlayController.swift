@@ -20,12 +20,14 @@ final class OverlayController {
         panel = nil
     }
 
-    /// 观察 overlayMode / pinned,变化即重配并重新武装观察。
+    /// 观察 overlayMode / pinned / barWidth / layoutEditing,变化即重配并重新武装观察。
     private func observe() {
         guard let store else { return }
         withObservationTracking {
             _ = store.overlayMode
             _ = store.pinned
+            _ = store.barWidth
+            _ = store.layoutEditing
         } onChange: {
             Task { @MainActor in
                 self.applyMode()
@@ -45,20 +47,34 @@ final class OverlayController {
     }
 
     private func makeBarPanel(_ store: SubtitleStore) -> NSPanel {
+        let width = store.barWidth
         let host = NSHostingView(rootView: SubtitleBarView(store: store))
-        host.frame = NSRect(x: 0, y: 0, width: 900, height: 200)
+        host.frame = NSRect(x: 0, y: 0, width: width, height: 200)
         let p = NSPanel(contentRect: host.frame, styleMask: [.nonactivatingPanel, .borderless],
                         backing: .buffered, defer: false)
         p.isFloatingPanel = true
         p.backgroundColor = .clear
         p.isOpaque = false
         p.hasShadow = true
-        p.ignoresMouseEvents = true                 // 字幕条点击穿透
+        // 布局编辑态:字幕条可交互 + 可拖;否则点击穿透。
+        p.ignoresMouseEvents = !store.layoutEditing
+        p.isMovableByWindowBackground = store.layoutEditing
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         p.contentView = host
-        if let screen = NSScreen.main {
+        if let x = defaults.object(forKey: "ls.barX") as? Double,
+           let y = defaults.object(forKey: "ls.barY") as? Double {
+            p.setFrameOrigin(NSPoint(x: x, y: y))
+        } else if let screen = NSScreen.main {
             let f = screen.visibleFrame
-            p.setFrameOrigin(NSPoint(x: f.midX - 450, y: f.minY + 60))
+            p.setFrameOrigin(NSPoint(x: f.midX - width / 2, y: f.minY + 60))
+        }
+        moveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification, object: p, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let origin = self.panel?.frame.origin else { return }
+                self.defaults.set(Double(origin.x), forKey: "ls.barX")
+                self.defaults.set(Double(origin.y), forKey: "ls.barY")
+            }
         }
         return p
     }

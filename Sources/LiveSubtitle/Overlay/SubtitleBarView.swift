@@ -40,8 +40,16 @@ struct SubtitleBarView: View {
             }
         }
         .padding(18)
-        .frame(width: 900, alignment: .leading)
+        .frame(width: store.barWidth, alignment: .leading)
         .background(.black.opacity(store.opacity), in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.1)))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .strokeBorder(
+                    store.layoutEditing ? Color.yellow.opacity(0.9) : Color.white.opacity(0.1),
+                    style: store.layoutEditing
+                        ? StrokeStyle(lineWidth: 2.5, dash: [8, 5])
+                        : StrokeStyle(lineWidth: 1)
+                )
+        )
     }
 }
