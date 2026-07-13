@@ -12,6 +12,12 @@ final class SubtitleStore {
     var opacity: Double { didSet { defaults.set(opacity, forKey: "ls.opacity") } }
     var fontSize: Double { didSet { defaults.set(fontSize, forKey: "ls.fontSize") } }
     var pinned: Bool { didSet { defaults.set(pinned, forKey: "ls.pinned") } }
+    var barWidth: Double { didSet { defaults.set(barWidth, forKey: "ls.barWidth") } }
+    var deepSeekAPIKey: String { didSet { defaults.set(deepSeekAPIKey, forKey: "ls.deepSeekKey") } }
+    var obsidianVaultPath: String { didSet { defaults.set(obsidianVaultPath, forKey: "ls.vaultPath") } }
+
+    /// 布局编辑态,瞬态(不持久化),启动永远 false。
+    var layoutEditing: Bool = false
 
     /// 每个 speaker 的"当前未定稿灰字行"索引;定稿后清除。
     private var volatileIndex: [Speaker: Int] = [:]
@@ -26,6 +32,10 @@ final class SubtitleStore {
         opacity = defaults.object(forKey: "ls.opacity") as? Double ?? 0.82
         fontSize = defaults.object(forKey: "ls.fontSize") as? Double ?? 22
         pinned = defaults.bool(forKey: "ls.pinned")
+        barWidth = defaults.object(forKey: "ls.barWidth") as? Double ?? 900
+        deepSeekAPIKey = defaults.string(forKey: "ls.deepSeekKey") ?? ""
+        obsidianVaultPath = defaults.string(forKey: "ls.vaultPath") ?? ""
+        layoutEditing = false
     }
 
     /// 暂存中间态,不立即上屏(由节流器 flush)。

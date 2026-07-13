@@ -14,6 +14,10 @@ final class SubtitleSettingsTests: XCTestCase {
         XCTAssertEqual(s.opacity, 0.82, accuracy: 0.0001)
         XCTAssertEqual(s.fontSize, 22, accuracy: 0.0001)
         XCTAssertFalse(s.pinned)
+        XCTAssertEqual(s.barWidth, 900, accuracy: 0.0001)
+        XCTAssertEqual(s.deepSeekAPIKey, "")
+        XCTAssertEqual(s.obsidianVaultPath, "")
+        XCTAssertFalse(s.layoutEditing)
     }
 
     func testSettingsPersistAcrossInstances() {
@@ -24,12 +28,26 @@ final class SubtitleSettingsTests: XCTestCase {
         s1.opacity = 0.5
         s1.fontSize = 28
         s1.pinned = true
+        s1.barWidth = 1200
+        s1.deepSeekAPIKey = "sk-test-123"
+        s1.obsidianVaultPath = "/Users/me/Vault"
         let s2 = SubtitleStore(defaults: suite)
         XCTAssertEqual(s2.displayMode, .translatedOnly)
         XCTAssertEqual(s2.overlayMode, .mini)
         XCTAssertEqual(s2.opacity, 0.5, accuracy: 0.0001)
         XCTAssertEqual(s2.fontSize, 28, accuracy: 0.0001)
         XCTAssertTrue(s2.pinned)
+        XCTAssertEqual(s2.barWidth, 1200, accuracy: 0.0001)
+        XCTAssertEqual(s2.deepSeekAPIKey, "sk-test-123")
+        XCTAssertEqual(s2.obsidianVaultPath, "/Users/me/Vault")
+    }
+
+    func testLayoutEditingIsTransient() {
+        let suite = freshSuite()
+        let s1 = SubtitleStore(defaults: suite)
+        s1.layoutEditing = true
+        let s2 = SubtitleStore(defaults: suite)
+        XCTAssertFalse(s2.layoutEditing)
     }
 
     func testDisplayModeHelpers() {
