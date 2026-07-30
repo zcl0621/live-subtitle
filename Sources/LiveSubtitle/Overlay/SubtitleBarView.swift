@@ -43,22 +43,26 @@ struct SubtitleLineRow: View {
 struct SubtitleBarView: View {
     var store: SubtitleStore
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(store.lines.suffix(3)) { line in
-                SubtitleLineRow(line: line, displayMode: store.displayMode, fontSize: store.fontSize)
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)          // 把字幕气泡顶到 panel 底部,上方多余高度透明
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(store.lines.suffix(3)) { line in
+                    SubtitleLineRow(line: line, displayMode: store.displayMode, fontSize: store.fontSize)
+                }
             }
+            .padding(18)
+            .frame(width: store.barWidth, alignment: .leading)
+            .background(.black.opacity(store.opacity), in: RoundedRectangle(cornerRadius: 18))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .strokeBorder(
+                        store.layoutEditing ? Color.yellow.opacity(0.9) : Color.white.opacity(0.1),
+                        style: store.layoutEditing
+                            ? StrokeStyle(lineWidth: 2.5, dash: [8, 5])
+                            : StrokeStyle(lineWidth: 1)
+                    )
+            )
         }
-        .padding(18)
-        .frame(width: store.barWidth, alignment: .leading)
-        .background(.black.opacity(store.opacity), in: RoundedRectangle(cornerRadius: 18))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .strokeBorder(
-                    store.layoutEditing ? Color.yellow.opacity(0.9) : Color.white.opacity(0.1),
-                    style: store.layoutEditing
-                        ? StrokeStyle(lineWidth: 2.5, dash: [8, 5])
-                        : StrokeStyle(lineWidth: 1)
-                )
-        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 }

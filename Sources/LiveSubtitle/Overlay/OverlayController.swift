@@ -12,6 +12,8 @@ final class OverlayController {
     private var active = false
     /// 观察代次:show/hide 时自增,使 hide 前武装的旧 withObservationTracking 回调失效(无法 cancel,只能靠代次作废)。
     private var generation = 0
+    /// 当前 panel 的形态;用于判断观察变化是否需要整块重建(仅形态变才重建)。
+    private var currentMode: OverlayMode?
 
     func show(store: SubtitleStore) {
         self.store = store
@@ -27,6 +29,7 @@ final class OverlayController {
         removeMoveObserver()
         panel?.orderOut(nil)
         panel = nil
+        currentMode = nil
     }
 
     /// 观察 overlayMode / pinned / barWidth / layoutEditing,变化即重配并重新武装观察。
@@ -42,10 +45,36 @@ final class OverlayController {
         } onChange: {
             Task { @MainActor in
                 guard self.active, gen == self.generation else { return }
-                self.applyMode()
+                self.reconfigure()
                 self.observe()
             }
         }
+    }
+
+    /// 观察回调:仅形态(bar⇄mini)变化才整块重建;pinned/barWidth/layoutEditing 变化就地改属性,
+    /// 避免每次调 Pin/拖宽度/切编辑态都重建 NSPanel(闪烁 + 丢滚动位置)。
+    private func reconfigure() {
+        guard active, let store else { return }
+        if currentMode != store.overlayMode || panel == nil {
+            applyMode()
+        } else {
+            updateInPlace(store)
+        }
+    }
+
+    private func updateInPlace(_ store: SubtitleStore) {
+        guard let p = panel else { return }
+        p.level = store.pinned ? .screenSaver : .floating
+        if store.overlayMode == .bar {
+            p.ignoresMouseEvents = !store.layoutEditing
+            p.isMovableByWindowBackground = store.layoutEditing
+            if abs(p.frame.size.width - store.barWidth) > 0.5 {
+                var f = p.frame
+                f.size.width = store.barWidth          // 就地改宽:内容随 autoresize + SwiftUI 重排,不重建
+                p.setFrame(f, display: true)
+            }
+        }
+        // mini:layoutEditing/barWidth 与它无关,无需任何重建(消除小窗模式下切编辑态的白重建)
     }
 
     private func applyMode() {
@@ -56,12 +85,17 @@ final class OverlayController {
         p.level = store.pinned ? .screenSaver : .floating
         p.orderFrontRegardless()
         panel = p
+        currentMode = store.overlayMode
     }
 
     private func makeBarPanel(_ store: SubtitleStore) -> NSPanel {
         let width = store.barWidth
+        // 高度取足够容纳最大字号(32)+ 双语 + 3 行的量;内容在 SubtitleBarView 内底对齐,
+        // 多出的空间透明不可见,字幕始终贴底不被裁。
+        let height: CGFloat = 300
         let host = NSHostingView(rootView: SubtitleBarView(store: store))
-        host.frame = NSRect(x: 0, y: 0, width: width, height: 200)
+        host.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        host.autoresizingMask = [.width, .height]     // 就地改宽时内容跟随
         let p = NSPanel(contentRect: host.frame, styleMask: [.nonactivatingPanel, .borderless],
                         backing: .buffered, defer: false)
         p.isFloatingPanel = true
