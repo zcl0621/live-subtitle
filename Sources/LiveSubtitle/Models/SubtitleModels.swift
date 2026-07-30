@@ -23,10 +23,13 @@ struct SubtitleLine: Identifiable, Sendable {
     var original: String
     var translated: String?
     var isFinal: Bool
+    /// 翻译已尝试但失败(区别于「尚未翻译/翻译中」)。UI 据此回退显原文而非永久「翻译中…」。
+    var translationFailed: Bool
 
     init(id: UUID = UUID(), speaker: Speaker, original: String,
-         translated: String? = nil, isFinal: Bool = false) {
+         translated: String? = nil, isFinal: Bool = false, translationFailed: Bool = false) {
         self.id = id; self.speaker = speaker; self.original = original
         self.translated = translated; self.isFinal = isFinal
+        self.translationFailed = translationFailed
     }
 }

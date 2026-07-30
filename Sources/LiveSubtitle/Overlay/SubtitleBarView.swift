@@ -22,6 +22,15 @@ struct SubtitleLineRow: View {
                 if displayMode.showsTranslated {
                     if let zh = line.translated {
                         Text(zh).font(.system(size: fontSize, weight: .medium)).foregroundStyle(.white)
+                    } else if line.translationFailed {
+                        if displayMode == .translatedOnly {
+                            // 仅译文模式:译文不可用时回退显原文,避免整行空白
+                            Text(line.original).font(.system(size: fontSize, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.85))
+                        } else {
+                            Text("(译文不可用)").font(.system(size: fontSize * 0.6))
+                                .foregroundStyle(.white.opacity(0.35))
+                        }
                     } else if line.isFinal {
                         Text("翻译中…").font(.system(size: fontSize * 0.64)).foregroundStyle(.white.opacity(0.3))
                     }

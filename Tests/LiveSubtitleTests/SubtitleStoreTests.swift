@@ -75,4 +75,63 @@ final class SubtitleStoreTests: XCTestCase {
         XCTAssertEqual(s.lines[0].original, "final text")
         XCTAssertTrue(s.lines[0].isFinal)
     }
+
+    // MARK: - T2 翻译失败回退
+
+    func testMarkTranslationFailedSetsFlagWhenUntranslated() {
+        let s = SubtitleStore()
+        let id = s.commitFinal(speaker: .other, text: "Hello.")
+        s.markTranslationFailed(id: id)
+        XCTAssertTrue(s.lines[0].translationFailed)
+        XCTAssertNil(s.lines[0].translated)
+    }
+
+    func testMarkTranslationFailedNoOpWhenAlreadyTranslated() {
+        let s = SubtitleStore()
+        let id = s.commitFinal(speaker: .other, text: "Hello.")
+        s.attachTranslation(id: id, zh: "你好。")
+        s.markTranslationFailed(id: id)                 // 已有译文,不应打失败标
+        XCTAssertFalse(s.lines[0].translationFailed)
+        XCTAssertEqual(s.lines[0].translated, "你好。")
+    }
+
+    func testAttachTranslationClearsFailedFlag() {
+        let s = SubtitleStore()
+        let id = s.commitFinal(speaker: .other, text: "Hello.")
+        s.markTranslationFailed(id: id)
+        s.attachTranslation(id: id, zh: "你好。")         // 成功回填应清除失败标
+        XCTAssertFalse(s.lines[0].translationFailed)
+        XCTAssertEqual(s.lines[0].translated, "你好。")
+    }
+
+    // MARK: - T1 边说边译(中间态翻译)守卫
+
+    func testCurrentVolatileTextReflectsLatestVolatile() {
+        let s = SubtitleStore()
+        XCTAssertNil(s.currentVolatileText(speaker: .other))
+        s.upsertVolatile(speaker: .other, text: "I think we")
+        XCTAssertEqual(s.currentVolatileText(speaker: .other), "I think we")
+    }
+
+    func testAttachVolatileTranslationAppliesWhenTextMatches() {
+        let s = SubtitleStore()
+        s.upsertVolatile(speaker: .other, text: "I think we")
+        s.attachVolatileTranslation(speaker: .other, sourceText: "I think we", zh: "我认为我们")
+        XCTAssertEqual(s.lines[0].translated, "我认为我们")
+    }
+
+    func testAttachVolatileTranslationDroppedWhenTextChanged() {
+        let s = SubtitleStore()
+        s.upsertVolatile(speaker: .other, text: "I think we should")   // 原文已生长
+        s.attachVolatileTranslation(speaker: .other, sourceText: "I think we", zh: "我认为我们")  // 过期片段
+        XCTAssertNil(s.lines[0].translated)                            // 不应贴过期译文
+    }
+
+    func testAttachVolatileTranslationDroppedAfterFinal() {
+        let s = SubtitleStore()
+        s.upsertVolatile(speaker: .other, text: "I think we")
+        _ = s.commitFinal(speaker: .other, text: "I think we should go.")   // 已定稿,volatileIndex 清空
+        s.attachVolatileTranslation(speaker: .other, sourceText: "I think we", zh: "我认为我们")
+        XCTAssertNil(s.lines[0].translated)                            // 不应回填到已定稿行
+    }
 }

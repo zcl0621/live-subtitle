@@ -30,6 +30,7 @@ struct LiveSubtitleApp: App {
                 Text("双语").tag(DisplayMode.both)
                 Text("译文").tag(DisplayMode.translatedOnly)
             }
+            Toggle("边说边译(中间态)", isOn: $s.translateVolatile)
             Picker("形态", selection: $s.overlayMode) {
                 Text("字幕条").tag(OverlayMode.bar)
                 Text("小窗").tag(OverlayMode.mini)

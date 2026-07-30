@@ -15,6 +15,8 @@ final class SubtitleStore {
     var barWidth: Double { didSet { defaults.set(barWidth, forKey: "ls.barWidth") } }
     var deepSeekAPIKey: String { didSet { defaults.set(deepSeekAPIKey, forKey: "ls.deepSeekKey") } }
     var obsidianVaultPath: String { didSet { defaults.set(obsidianVaultPath, forKey: "ls.vaultPath") } }
+    /// 边说边译:对未定稿的中间态也翻译(降延迟,代价是译文会随句子生长而跳变)。
+    var translateVolatile: Bool { didSet { defaults.set(translateVolatile, forKey: "ls.translateVolatile") } }
 
     /// 布局编辑态,瞬态(不持久化),启动永远 false。
     var layoutEditing: Bool = false
@@ -35,6 +37,7 @@ final class SubtitleStore {
         barWidth = defaults.object(forKey: "ls.barWidth") as? Double ?? 900
         deepSeekAPIKey = defaults.string(forKey: "ls.deepSeekKey") ?? ""
         obsidianVaultPath = defaults.string(forKey: "ls.vaultPath") ?? ""
+        translateVolatile = defaults.object(forKey: "ls.translateVolatile") as? Bool ?? true
         layoutEditing = false
     }
 
@@ -78,6 +81,26 @@ final class SubtitleStore {
 
     func attachTranslation(id: UUID, zh: String) {
         guard let i = lines.firstIndex(where: { $0.id == id }) else { return }
+        lines[i].translated = zh
+        lines[i].translationFailed = false   // 成功则清除任何旧的失败标记
+    }
+
+    /// 翻译尝试失败:打标记,UI 据此回退显原文而非永久「翻译中…」。
+    func markTranslationFailed(id: UUID) {
+        guard let i = lines.firstIndex(where: { $0.id == id }) else { return }
+        if lines[i].translated == nil { lines[i].translationFailed = true }
+    }
+
+    /// 当前某 speaker 未定稿中间态的原文(供边说边译读取);无则 nil。
+    func currentVolatileText(speaker: Speaker) -> String? {
+        guard let i = volatileIndex[speaker] else { return nil }
+        return lines[i].original
+    }
+
+    /// 回填中间态译文:仅当该 speaker 的中间态行仍存在、仍未定稿、且原文未变(== sourceText)时才应用,
+    /// 避免把过期片段的译文贴到已被新内容替换或已定稿的行上。
+    func attachVolatileTranslation(speaker: Speaker, sourceText: String, zh: String) {
+        guard let i = volatileIndex[speaker], !lines[i].isFinal, lines[i].original == sourceText else { return }
         lines[i].translated = zh
     }
 }
