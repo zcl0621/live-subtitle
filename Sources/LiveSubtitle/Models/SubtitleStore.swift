@@ -17,8 +17,6 @@ final class SubtitleStore {
     var obsidianVaultPath: String { didSet { defaults.set(obsidianVaultPath, forKey: "ls.vaultPath") } }
     /// 边说边译:对未定稿的中间态也翻译(降延迟,代价是译文会随句子生长而跳变)。
     var translateVolatile: Bool { didSet { defaults.set(translateVolatile, forKey: "ls.translateVolatile") } }
-    /// 外观齿轮浮层是否展开(展开=显示透明度/字号/宽度滑块)。
-    var appearanceExpanded: Bool { didSet { defaults.set(appearanceExpanded, forKey: "ls.appearanceExpanded") } }
 
     /// 布局编辑态,瞬态(不持久化),启动永远 false。
     var layoutEditing: Bool = false
@@ -48,7 +46,6 @@ final class SubtitleStore {
         deepSeekAPIKey = defaults.string(forKey: "ls.deepSeekKey") ?? ""
         obsidianVaultPath = defaults.string(forKey: "ls.vaultPath") ?? ""
         translateVolatile = defaults.object(forKey: "ls.translateVolatile") as? Bool ?? true
-        appearanceExpanded = defaults.bool(forKey: "ls.appearanceExpanded")
         layoutEditing = false
     }
 

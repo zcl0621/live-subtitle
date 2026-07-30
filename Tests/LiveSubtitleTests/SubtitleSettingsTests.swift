@@ -19,7 +19,6 @@ final class SubtitleSettingsTests: XCTestCase {
         XCTAssertEqual(s.obsidianVaultPath, "")
         XCTAssertFalse(s.layoutEditing)
         XCTAssertTrue(s.translateVolatile)     // 默认开(边说边译)
-        XCTAssertFalse(s.appearanceExpanded)   // 默认收起(只显齿轮)
     }
 
     func testSettingsPersistAcrossInstances() {
@@ -34,7 +33,6 @@ final class SubtitleSettingsTests: XCTestCase {
         s1.deepSeekAPIKey = "sk-test-123"
         s1.obsidianVaultPath = "/Users/me/Vault"
         s1.translateVolatile = false
-        s1.appearanceExpanded = true
         let s2 = SubtitleStore(defaults: suite)
         XCTAssertEqual(s2.displayMode, .translatedOnly)
         XCTAssertEqual(s2.overlayMode, .mini)
@@ -45,7 +43,6 @@ final class SubtitleSettingsTests: XCTestCase {
         XCTAssertEqual(s2.deepSeekAPIKey, "sk-test-123")
         XCTAssertEqual(s2.obsidianVaultPath, "/Users/me/Vault")
         XCTAssertFalse(s2.translateVolatile)
-        XCTAssertTrue(s2.appearanceExpanded)
     }
 
     func testLayoutEditingIsTransient() {

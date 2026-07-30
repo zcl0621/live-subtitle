@@ -18,46 +18,89 @@ struct LiveSubtitleApp: App {
     @Environment(\.openSettings) private var openSettings
 
     var body: some Scene {
+        // .window 样式:下拉是真正的 SwiftUI 面板,滑块能正常渲染并拖动
+        // (默认 .menu 走原生 NSMenu,Slider 会退化成 Decrement/Increment 子菜单)
         MenuBarExtra("LiveSubtitle", systemImage: "captions.bubble") {
-          Group {
-            @Bindable var s = store
+            menuPanel
+        }
+        .menuBarExtraStyle(.window)
+
+        Settings {
+            SettingsView(store: store)
+        }
+    }
+
+    @ViewBuilder private var menuPanel: some View {
+        @Bindable var s = store
+        VStack(alignment: .leading, spacing: 12) {
             Button(running ? "停止字幕" : "开始字幕") { toggle() }
-            if !status.isEmpty { Text(status).font(.caption) }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .frame(maxWidth: .infinity)
+            if !status.isEmpty {
+                Text(status).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+
             Divider()
 
             Picker("显示", selection: $s.displayMode) {
                 Text("原文").tag(DisplayMode.originalOnly)
                 Text("双语").tag(DisplayMode.both)
                 Text("译文").tag(DisplayMode.translatedOnly)
-            }
-            Toggle("边说边译(中间态)", isOn: $s.translateVolatile)
+            }.pickerStyle(.segmented)
             Picker("形态", selection: $s.overlayMode) {
                 Text("字幕条").tag(OverlayMode.bar)
                 Text("小窗").tag(OverlayMode.mini)
-            }
+            }.pickerStyle(.segmented)
+
+            Toggle("边说边译(中间态)", isOn: $s.translateVolatile)
             Toggle("置顶 Pin", isOn: $s.pinned)
+            Toggle("布局编辑(拖动字幕条)", isOn: $s.layoutEditing)
+
             Divider()
 
-            // 透明度/字号/字幕条宽度在字幕条旁的齿轮浮层里调(原生菜单渲染不了滑块)
-            Toggle("外观面板(齿轮展开)", isOn: $s.appearanceExpanded)
-            Toggle("布局编辑(拖动字幕条)", isOn: $s.layoutEditing)
+            slider("透明度", value: $s.opacity, in: 0.4...1.0, display: "\(Int(store.opacity * 100))%")
+            slider("字号", value: $s.fontSize, in: 16...32, step: 1, display: "\(Int(store.fontSize))")
+            if store.overlayMode == .bar {
+                slider("字幕条宽度", value: $s.barWidth, in: 600...1400, step: 20, display: "\(Int(store.barWidth))")
+            }
+
             Divider()
 
             Button("整理并导出到 Obsidian") { exportToObsidian() }
                 .disabled(isExporting)
-            if !exportStatus.isEmpty { Text(exportStatus).font(.caption) }
-            Button("设置…") {
-                NSApp.activate(ignoringOtherApps: true)   // 菜单栏触发时确保设置窗口置前获焦
-                openSettings()
+                .frame(maxWidth: .infinity)
+            if !exportStatus.isEmpty {
+                Text(exportStatus).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            Divider()
-
-            Button("退出") { NSApplication.shared.terminate(nil) }
-          }
+            HStack {
+                Button("设置…") {
+                    NSApp.activate(ignoringOtherApps: true)   // 菜单栏触发时确保设置窗口置前获焦
+                    openSettings()
+                }
+                Spacer()
+                Button("退出") { NSApplication.shared.terminate(nil) }
+            }
         }
+        .padding(14)
+        .frame(width: 280)
+    }
 
-        Settings {
-            SettingsView(store: store)
+    /// 带右侧数值的紧凑滑块行(.window 样式下 Slider 正常可用)。
+    @ViewBuilder private func slider(_ title: String, value: Binding<Double>,
+                                     in range: ClosedRange<Double>, step: Double? = nil,
+                                     display: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(title).font(.caption)
+                Spacer()
+                Text(display).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            }
+            if let step {
+                Slider(value: value, in: range, step: step)
+            } else {
+                Slider(value: value, in: range)
+            }
         }
     }
 
