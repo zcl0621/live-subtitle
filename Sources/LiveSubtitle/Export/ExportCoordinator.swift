@@ -27,7 +27,7 @@ enum ExportCoordinator {
                 summary = result.summary
             } catch {
                 title = fallbackTitle(now)
-                summary = "(DeepSeek 总结失败,已跳过)"
+                summary = "(DeepSeek 总结失败:\(shortReason(error)),已跳过)"
             }
         } else {
             title = fallbackTitle(now)
@@ -52,6 +52,18 @@ enum ExportCoordinator {
     }
 
     /// 无 DeepSeek 时的回退标题:只用时刻(日期已在文件名前缀里,避免重复)。
+    /// 失败原因的简短可读描述(区分坏 key / 网络 / 限流等),不塞 http body 长串。
+    private static func shortReason(_ error: Error) -> String {
+        if let e = error as? DeepSeekClient.DeepSeekError {
+            switch e {
+            case .missingKey: return "未配置 key"
+            case .http(let code, _): return "HTTP \(code)"
+            case .badResponse: return "响应异常"
+            }
+        }
+        return (error as NSError).localizedDescription   // 网络类(超时/断网等)
+    }
+
     private static func fallbackTitle(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

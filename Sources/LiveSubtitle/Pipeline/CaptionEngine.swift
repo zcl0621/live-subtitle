@@ -10,6 +10,7 @@ final class CaptionEngine {
     private var volatileTranslateTask: Task<Void, Never>?
     private var lastVolatileSource: [Speaker: String] = [:]   // 每 speaker 上次已送翻译的中间态,去重
     private var volatileInFlight: Set<Speaker> = []           // 每 speaker 是否有中间态翻译在途,防叠
+    private var stopped = false                               // stop 后为 true,阻止旧 consume 继续写共享 store
 
     /// 默认双轨:对方(系统音)+ 我(麦克风)。测试可注入自定义轨。
     init(store: SubtitleStore, tracks: [(AudioSource, TranscriptionPipeline)]? = nil) {
@@ -35,11 +36,16 @@ final class CaptionEngine {
             tasks.append(Task {
                 do {
                     try await track.pipeline.ensureModel()
-                    let events = try await track.pipeline.start()
+                    // 识别流中途抛错 → 上报,避免字幕静默冻结
+                    let events = try await track.pipeline.start(onError: { msg in
+                        Task { @MainActor in onError(msg) }
+                    })
                     let consume = Task { @MainActor in
                         for await e in events {
+                            if stopped { break }   // stop 后不再写共享 store(防旧会话污染快速重启的新会话)
                             if e.isFinal {
                                 let id = store.commitFinal(speaker: track.source.speaker, text: e.text)
+                                lastVolatileSource[track.source.speaker] = nil   // 定稿后清去重,下句同短语也能边说边译
                                 if store.displayMode.showsTranslated {   // 原文模式不触发翻译(省资源,对齐 PRD)
                                     Task { @MainActor in
                                         if let zh = await track.translator.translate(e.text) {
@@ -58,6 +64,8 @@ final class CaptionEngine {
                         await track.pipeline.feed(frame)
                     }
                     await consume.value
+                } catch is CancellationError {
+                    // 用户主动停止,不当作错误上报
                 } catch {
                     onError("启动失败:\(error.localizedDescription)")
                 }
@@ -95,6 +103,7 @@ final class CaptionEngine {
     }
 
     func stop() {
+        stopped = true
         flushTask?.cancel(); flushTask = nil
         volatileTranslateTask?.cancel(); volatileTranslateTask = nil
         tasks.forEach { $0.cancel() }; tasks = []

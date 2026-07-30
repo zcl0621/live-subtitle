@@ -71,6 +71,7 @@ struct DeepSeekClient {
 
         var request = URLRequest(url: Self.endpoint)
         request.httpMethod = "POST"
+        request.timeoutInterval = 30   // 避免半开网络下默认 60s 静默挂起
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(body)

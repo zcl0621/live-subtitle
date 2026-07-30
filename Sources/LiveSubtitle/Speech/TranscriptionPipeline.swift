@@ -29,7 +29,8 @@ actor TranscriptionPipeline {
     }
 
     /// 启动:返回结果事件流;内部起分析 Task。
-    func start() async throws -> AsyncStream<TranscriptEvent> {
+    /// onError:识别流中途抛错时上报(否则字幕会静默冻结,用户无从察觉)。
+    func start(onError: (@Sendable (String) -> Void)? = nil) async throws -> AsyncStream<TranscriptEvent> {
         let (inStream, inCont) = AsyncStream<AnalyzerInput>.makeStream()
         inputCont = inCont
         try await analyzer.start(inputSequence: inStream)
@@ -39,7 +40,9 @@ actor TranscriptionPipeline {
                     for try await r in transcriber.results {
                         cont.yield(TranscriptEvent(text: String(r.text.characters), isFinal: r.isFinal))
                     }
-                } catch { }
+                } catch {
+                    onError?("识别中断:\(error.localizedDescription) — 请停止后重开字幕")
+                }
                 cont.finish()
             }
         }

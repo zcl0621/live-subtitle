@@ -11,17 +11,20 @@ final class SystemAudioSource: NSObject, AudioSource, SCStreamOutput, SCStreamDe
     private let converter = FormatConverter()
     private var stream: SCStream?
     private var continuation: AsyncStream<AudioFrame>.Continuation?
+    private var startTask: Task<Void, Never>?
+    private var stopped = false   // stop 已调用;start 在异步就绪后据此自拆,避免孤儿 SCStream
 
     func frames() -> AsyncStream<AudioFrame> {
         AsyncStream(bufferingPolicy: .bufferingNewest(32)) { cont in
             self.continuation = cont
-            Task { await self.start() }
+            self.startTask = Task { await self.start() }
         }
     }
 
     private func start() async {
         do {
             let content = try await SCShareableContent.current
+            if stopped { continuation?.finish(); return }   // 解析期间已 stop → 不再建流
             guard let display = content.displays.first else {
                 onError?("未找到可采集的显示器"); continuation?.finish(); return
             }
@@ -35,6 +38,10 @@ final class SystemAudioSource: NSObject, AudioSource, SCStreamOutput, SCStreamDe
             let s = SCStream(filter: filter, configuration: config, delegate: self)
             try s.addStreamOutput(self, type: .audio, sampleHandlerQueue: DispatchQueue(label: "sysaudio"))
             try await s.startCapture()
+            if stopped {                       // startCapture 期间已 stop → 立即拆掉,别留孤儿流
+                try? await s.stopCapture()
+                continuation?.finish(); return
+            }
             stream = s
         } catch {
             onError?("系统音频采集失败:\(error.localizedDescription) — 请在 系统设置→隐私与安全性→屏幕录制 授权 LiveSubtitle")
@@ -49,7 +56,10 @@ final class SystemAudioSource: NSObject, AudioSource, SCStreamOutput, SCStreamDe
     }
 
     func stop() async {
-        try? await stream?.stopCapture()
+        stopped = true
+        startTask?.cancel()
+        _ = await startTask?.value          // 等在途 start 结束:它要么自拆、要么已把 stream 设好
+        try? await stream?.stopCapture()    // 兜底停掉已建好的流
         stream = nil
         continuation?.finish()
     }

@@ -82,13 +82,19 @@ final class SubtitleStore {
     func attachTranslation(id: UUID, zh: String) {
         guard let i = lines.firstIndex(where: { $0.id == id }) else { return }
         lines[i].translated = zh
-        lines[i].translationFailed = false   // 成功则清除任何旧的失败标记
+        lines[i].translationFailed = false      // 成功则清除任何旧的失败标记
+        lines[i].translationProvisional = false // 定稿译文,不再是临时半句
     }
 
-    /// 翻译尝试失败:打标记,UI 据此回退显原文而非永久「翻译中…」。
+    /// 翻译尝试失败:打标记,UI 据此回退显原文而非永久「翻译中…」或残留的半句译文。
+    /// 未翻译(nil)或仅有中间态临时译文(provisional)时都视为失败并清掉临时译文。
     func markTranslationFailed(id: UUID) {
         guard let i = lines.firstIndex(where: { $0.id == id }) else { return }
-        if lines[i].translated == nil { lines[i].translationFailed = true }
+        if lines[i].translated == nil || lines[i].translationProvisional {
+            lines[i].translated = nil
+            lines[i].translationProvisional = false
+            lines[i].translationFailed = true
+        }
     }
 
     /// 当前某 speaker 未定稿中间态的原文(供边说边译读取);无则 nil。
@@ -102,5 +108,6 @@ final class SubtitleStore {
     func attachVolatileTranslation(speaker: Speaker, sourceText: String, zh: String) {
         guard let i = volatileIndex[speaker], !lines[i].isFinal, lines[i].original == sourceText else { return }
         lines[i].translated = zh
+        lines[i].translationProvisional = true   // 半句临时译文;终句译文到位或失败时会被覆盖/清除
     }
 }

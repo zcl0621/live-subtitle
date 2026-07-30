@@ -73,12 +73,19 @@ final class OverlayController {
         p.isMovableByWindowBackground = store.layoutEditing
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         p.contentView = host
+        let barDefault: NSPoint = {
+            if let screen = NSScreen.main {
+                let f = screen.visibleFrame
+                return NSPoint(x: f.midX - width / 2, y: f.minY + 60)
+            }
+            return NSPoint(x: 100, y: 100)
+        }()
         if let x = defaults.object(forKey: "ls.barX") as? Double,
            let y = defaults.object(forKey: "ls.barY") as? Double {
             p.setFrameOrigin(NSPoint(x: x, y: y))
-        } else if let screen = NSScreen.main {
-            let f = screen.visibleFrame
-            p.setFrameOrigin(NSPoint(x: f.midX - width / 2, y: f.minY + 60))
+            ensureVisible(p, fallback: barDefault)
+        } else {
+            p.setFrameOrigin(barDefault)
         }
         moveObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didMoveNotification, object: p, queue: .main) { [weak self] _ in
@@ -107,12 +114,19 @@ final class OverlayController {
         p.minSize = NSSize(width: 260, height: 180)    // 缩放下限
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         p.contentView = host
+        let miniDefault: NSPoint = {
+            if let screen = NSScreen.main {
+                let f = screen.visibleFrame
+                return NSPoint(x: f.maxX - 400, y: f.minY + 80)
+            }
+            return NSPoint(x: 100, y: 100)
+        }()
         if let x = defaults.object(forKey: "ls.miniX") as? Double,
            let y = defaults.object(forKey: "ls.miniY") as? Double {
             p.setFrameOrigin(NSPoint(x: x, y: y))
-        } else if let screen = NSScreen.main {
-            let f = screen.visibleFrame
-            p.setFrameOrigin(NSPoint(x: f.maxX - 400, y: f.minY + 80))
+            ensureVisible(p, fallback: miniDefault)
+        } else {
+            p.setFrameOrigin(miniDefault)
         }
         moveObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.didMoveNotification, object: p, queue: .main) { [weak self] _ in
@@ -136,5 +150,12 @@ final class OverlayController {
     private func removeMoveObserver() {
         if let o = moveObserver { NotificationCenter.default.removeObserver(o); moveObserver = nil }
         if let o = resizeObserver { NotificationCenter.default.removeObserver(o); resizeObserver = nil }
+    }
+
+    /// 恢复的坐标可能因显示器拔插/分辨率变化落到屏外(浮窗不可见且无恢复入口);
+    /// 不与任一屏可见区相交则回退到默认位置。
+    private func ensureVisible(_ p: NSPanel, fallback: NSPoint) {
+        let onScreen = NSScreen.screens.contains { $0.visibleFrame.intersects(p.frame) }
+        if !onScreen { p.setFrameOrigin(fallback) }
     }
 }

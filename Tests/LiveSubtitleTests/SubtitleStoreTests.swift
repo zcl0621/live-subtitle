@@ -134,4 +134,37 @@ final class SubtitleStoreTests: XCTestCase {
         s.attachVolatileTranslation(speaker: .other, sourceText: "I think we", zh: "我认为我们")
         XCTAssertNil(s.lines[0].translated)                            // 不应回填到已定稿行
     }
+
+    // MARK: - 半句临时译文(provisional)在定稿后的处理
+
+    func testCommitFinalCarriesProvisionalVolatileTranslation() {
+        let s = SubtitleStore()
+        s.upsertVolatile(speaker: .other, text: "I think we")
+        s.attachVolatileTranslation(speaker: .other, sourceText: "I think we", zh: "我认为我们")
+        XCTAssertTrue(s.lines[0].translationProvisional)
+        _ = s.commitFinal(speaker: .other, text: "I think we should cancel.")
+        XCTAssertEqual(s.lines[0].translated, "我认为我们")   // 半句译文暂留(平滑过渡)
+        XCTAssertTrue(s.lines[0].translationProvisional)     // 仍是临时,未定稿
+    }
+
+    func testMarkFailedClearsProvisionalTranslation() {
+        let s = SubtitleStore()
+        s.upsertVolatile(speaker: .other, text: "I think we")
+        s.attachVolatileTranslation(speaker: .other, sourceText: "I think we", zh: "我认为我们")
+        let id = s.commitFinal(speaker: .other, text: "I think we should cancel.")
+        s.markTranslationFailed(id: id)                      // 终句重译失败
+        XCTAssertNil(s.lines[0].translated)                  // 清掉过期半句译文,别当定稿译文
+        XCTAssertTrue(s.lines[0].translationFailed)          // 回退显原文
+        XCTAssertFalse(s.lines[0].translationProvisional)
+    }
+
+    func testAttachTranslationClearsProvisional() {
+        let s = SubtitleStore()
+        s.upsertVolatile(speaker: .other, text: "I think we")
+        s.attachVolatileTranslation(speaker: .other, sourceText: "I think we", zh: "我认为我们")
+        let id = s.commitFinal(speaker: .other, text: "I think we should cancel.")
+        s.attachTranslation(id: id, zh: "我认为我们应该取消。")   // 终句成句译文到位
+        XCTAssertEqual(s.lines[0].translated, "我认为我们应该取消。")
+        XCTAssertFalse(s.lines[0].translationProvisional)
+    }
 }
