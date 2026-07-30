@@ -167,4 +167,25 @@ final class SubtitleStoreTests: XCTestCase {
         XCTAssertEqual(s.lines[0].translated, "我认为我们应该取消。")
         XCTAssertFalse(s.lines[0].translationProvisional)
     }
+
+    // MARK: - 保留上限 + O(1) 索引在截断后仍正确
+
+    func testLinesCappedAndLatestStillLocatable() {
+        let s = SubtitleStore()
+        var lastID = UUID()
+        for k in 0..<2100 { lastID = s.commitFinal(speaker: .other, text: "line \(k)") }
+        XCTAssertLessThanOrEqual(s.lines.count, 2000)          // 超限被截断
+        XCTAssertEqual(s.lines.last?.original, "line 2099")    // 最新行保留
+        s.attachTranslation(id: lastID, zh: "最后一行")          // 截断后 id→index 仍能定位
+        XCTAssertEqual(s.lines.last?.translated, "最后一行")
+    }
+
+    func testVolatileSurvivesTrim() {
+        let s = SubtitleStore()
+        for k in 0..<2100 { _ = s.commitFinal(speaker: .other, text: "f\(k)") }
+        s.upsertVolatile(speaker: .me, text: "hello")          // 新中间态在尾部,不应被截断影响
+        XCTAssertEqual(s.currentVolatileText(speaker: .me), "hello")
+        s.attachVolatileTranslation(speaker: .me, sourceText: "hello", zh: "你好")
+        XCTAssertEqual(s.lines.last(where: { $0.speaker == .me })?.translated, "你好")
+    }
 }
