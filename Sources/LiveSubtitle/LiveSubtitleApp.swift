@@ -38,15 +38,9 @@ struct LiveSubtitleApp: App {
             Toggle("置顶 Pin", isOn: $s.pinned)
             Divider()
 
-            Text("透明度")
-            Slider(value: $s.opacity, in: 0.4...1.0)
-            Text("字号")
-            Slider(value: $s.fontSize, in: 16...32, step: 1)
-            Divider()
-
+            // 透明度/字号/字幕条宽度在字幕条旁的齿轮浮层里调(原生菜单渲染不了滑块)
+            Toggle("外观面板(齿轮展开)", isOn: $s.appearanceExpanded)
             Toggle("布局编辑(拖动字幕条)", isOn: $s.layoutEditing)
-            Text("字幕条宽度")
-            Slider(value: $s.barWidth, in: 600...1400, step: 20)
             Divider()
 
             Button("整理并导出到 Obsidian") { exportToObsidian() }

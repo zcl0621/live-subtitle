@@ -4,6 +4,8 @@ import SwiftUI
 @MainActor
 final class OverlayController {
     private var panel: NSPanel?
+    private var gearPanel: NSPanel?          // 外观控制小窗(齿轮/滑块),独立可点击
+    private var gearMoveObserver: NSObjectProtocol?
     private var store: SubtitleStore?
     private var moveObserver: NSObjectProtocol?
     private var resizeObserver: NSObjectProtocol?
@@ -20,6 +22,7 @@ final class OverlayController {
         active = true
         generation &+= 1
         applyMode()
+        showGear(store)
         observe()
     }
 
@@ -30,6 +33,9 @@ final class OverlayController {
         panel?.orderOut(nil)
         panel = nil
         currentMode = nil
+        if let o = gearMoveObserver { NotificationCenter.default.removeObserver(o); gearMoveObserver = nil }
+        gearPanel?.orderOut(nil)
+        gearPanel = nil
     }
 
     /// 观察 overlayMode / pinned / barWidth / layoutEditing,变化即重配并重新武装观察。
@@ -42,6 +48,7 @@ final class OverlayController {
             _ = store.pinned
             _ = store.barWidth
             _ = store.layoutEditing
+            _ = store.appearanceExpanded
         } onChange: {
             Task { @MainActor in
                 guard self.active, gen == self.generation else { return }
@@ -60,6 +67,7 @@ final class OverlayController {
         } else {
             updateInPlace(store)
         }
+        syncGearSize(store)      // 齿轮窗随展开/收起改尺寸,并保持置顶层级
     }
 
     private func updateInPlace(_ store: SubtitleStore) {
@@ -179,6 +187,69 @@ final class OverlayController {
             }
         }
         return p
+    }
+
+    // MARK: - 外观控制小窗(齿轮)
+
+    /// 齿轮窗尺寸:收起=小圆按钮,展开=滑块面板(bar 模式多一条宽度滑块)。
+    private func gearSize(_ store: SubtitleStore) -> NSSize {
+        guard store.appearanceExpanded else { return NSSize(width: 40, height: 40) }
+        return NSSize(width: 260, height: store.overlayMode == .bar ? 190 : 150)
+    }
+
+    /// 外观控制必须自成一窗:字幕条整窗点击穿透,无法只让齿轮那块可点。
+    private func showGear(_ store: SubtitleStore) {
+        let size = gearSize(store)
+        let host = NSHostingView(rootView: AppearanceControlView(store: store))
+        host.frame = NSRect(origin: .zero, size: size)
+        host.autoresizingMask = [.width, .height]
+        let p = NSPanel(contentRect: host.frame, styleMask: [.nonactivatingPanel, .borderless],
+                        backing: .buffered, defer: false)
+        p.isFloatingPanel = true
+        p.backgroundColor = .clear
+        p.isOpaque = false
+        p.hasShadow = true
+        p.isMovableByWindowBackground = true       // 齿轮窗可拖到顺手的位置
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        p.contentView = host
+        let gearDefault: NSPoint = {
+            if let screen = NSScreen.main {
+                let f = screen.visibleFrame
+                return NSPoint(x: f.midX + store.barWidth / 2 + 12, y: f.minY + 60)   // 默认贴字幕条右侧
+            }
+            return NSPoint(x: 120, y: 120)
+        }()
+        if let x = defaults.object(forKey: "ls.gearX") as? Double,
+           let y = defaults.object(forKey: "ls.gearY") as? Double {
+            p.setFrameOrigin(NSPoint(x: x, y: y))
+            ensureVisible(p, fallback: gearDefault)
+        } else {
+            p.setFrameOrigin(gearDefault)
+        }
+        p.level = store.pinned ? .screenSaver : .floating
+        p.orderFrontRegardless()
+        gearPanel = p
+        gearMoveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification, object: p, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let origin = self.gearPanel?.frame.origin else { return }
+                self.defaults.set(Double(origin.x), forKey: "ls.gearX")
+                self.defaults.set(Double(origin.y), forKey: "ls.gearY")
+            }
+        }
+    }
+
+    /// 展开/收起或形态变化后同步齿轮窗尺寸(就地改,不重建)。左上角锚定,避免展开时越过屏底。
+    private func syncGearSize(_ store: SubtitleStore) {
+        guard let p = gearPanel else { return }
+        p.level = store.pinned ? .screenSaver : .floating
+        let size = gearSize(store)
+        guard abs(p.frame.width - size.width) > 0.5 || abs(p.frame.height - size.height) > 0.5 else { return }
+        var f = p.frame
+        f.origin.y += f.size.height - size.height     // 保持顶边不动
+        f.size = size
+        p.setFrame(f, display: true)
+        ensureVisible(p, fallback: f.origin)
     }
 
     private func removeMoveObserver() {
