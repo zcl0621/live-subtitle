@@ -6,8 +6,17 @@ CONF="${1:-debug}"
 swift build -c "$CONF"
 BIN=".build/$CONF/LiveSubtitle"
 APP="build/LiveSubtitle.app"
-rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS"
+rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/LiveSubtitle"
+
+# 应用图标:缺失时用 scripts/make-icon.swift 现画(bars / cjk / mixed)
+# 换风格: rm build/AppIcon.icns && ICON_STYLE=bars bash scripts/build-app.sh
+ICON_STYLE="${ICON_STYLE:-cjk}"
+if [ ! -f build/AppIcon.icns ]; then
+  swift scripts/make-icon.swift build "$ICON_STYLE" >/dev/null
+  iconutil -c icns build/AppIcon.iconset -o build/AppIcon.icns
+fi
+cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -16,6 +25,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key><string>LiveSubtitle</string>
   <key>CFBundleIdentifier</key><string>com.livesubtitle.app</string>
   <key>CFBundleName</key><string>LiveSubtitle</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1</string>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
