@@ -27,13 +27,34 @@
 - NSWindow move/resize 回调照抄既有 mini 的 `MainActor.assumeIsolated + [weak self]`。
 - `DeepSeekClient` 纯值 struct + async,`Result` Sendable。
 
-## ⏳ 未验证(需真机手测,不能靠单测覆盖)
+## 后续变更(2026-07-30,同一分支继续)
 
-1. bar 布局编辑拖动 + 宽度滑条实时变化;bar 位置重启后恢复。
-2. mini 边缘缩放手感(borderless panel 边缘抓取区较窄,尤其需肉眼确认)+ 尺寸重启恢复。
-3. 启动时麦克风 + 屏幕录制权限框弹出时机。
-4. 设置页打开、`NSOpenPanel` 选 vault、填真 DeepSeek key → 真实调用 + 写出 .md 到 vault。
+| commit | 内容 |
+|--------|------|
+| `359b499` | 复审修复:幽灵浮窗(hide 后改设置会复活)、导出同名覆盖、导出重入、YAML title 转义、设置窗置前 |
+| `cf247ce` | 翻译三项:**边说边译**(中间态也翻,降延迟,菜单可关)、失败回退显原文(不再永久「翻译中…」)、仅原文模式跳翻译 |
+| `0dfd750` | 全量复审修复:**孤儿 SCStream**(停止后屏录仍开)、半句译文被当定稿译文、旧 consume 写脏新会话、识别流静默冻结 |
+| `61c3c17` | store:id→index O(1) 查找 + 保留上限 2000 行(长会话内存/延迟蠕变) |
+| `5bfdfe8` | 字幕条大字号不再被裁(底对齐)+ 属性变化就地更新(消除重建闪烁) |
+| `9f1e86c` → `7c52a9a` | 外观控件位置:先试字幕条旁齿轮浮窗 → 用户判定不好看,**改回菜单栏并换 `.menuBarExtraStyle(.window)`**(原生 NSMenu 渲染不了滑块,会退化成 Decrement/Increment) |
+| `97cc9dd` | 应用图标:`scripts/make-icon.swift` 纯 AppKit 生成 `.icns`(bars/cjk/mixed 三风格,默认 cjk)接入 bundle |
+
+**期间做了两轮多 agent 代码复审**(5 个 commit 逐一审 + 6 个子系统全量审),真 bug 都已修并有单测覆盖;被复审排除的疑点见各 commit message。
+
+## ✅ 真机手测(2026-07-30,用户验收通过)
+
+用户实机跑过并确认「功能都正常」,覆盖 Phase 3/4/5 全部交互:显示三态、字幕条⇄小窗、Pin、透明度/字号/宽度、布局编辑拖动、小窗缩放、启动权限、设置页、导出。
+
+> 记录口径:此结论来自用户的实机反馈,不是自动化测试断言。单测(31)只覆盖 store/模型/格式转换等纯逻辑层。
+
+## 已知取舍(非缺陷)
+
+- **API key 明文存 UserDefaults** —— 自用取舍,上架/沙盒化再换 Keychain。
+- **保留行数上限 2000** —— 极长会话会丢最早的回看历史(导出用当前保留的行)。
+- **本地翻译逐句、无上下文、句界依赖 STT** —— Apple 本地 `TranslationSession` 的固有上限,要上下文得上云,与"实时链路不上云"的决策冲突,故不做。
+- **拔外接屏时已显示的浮窗不会自动重定位**(无 `didChangeScreenParametersNotification` 监听);下次创建时 `clampToScreen` 会夹回屏内。
+- **菜单栏图标仍是单色 SF Symbol**;`.icns` 只在 Finder/聚焦/简介可见(LSUIElement 无 Dock 图标)。
 
 ## 未动
 
-音频 / 识别 / 翻译 / 管线(`Audio/**` `Speech/**` `Translation/**` `Pipeline/**`)一行没碰。
+音频 / 识别管线(`Audio/**` `Speech/**` `Pipeline/**` 的采集与识别部分)保持原状;本轮只在 `CaptionEngine` 编排层和 `TranslationService` 上按需改动(边说边译、串行化、错误上报)。

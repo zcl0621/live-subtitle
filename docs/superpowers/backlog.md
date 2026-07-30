@@ -7,7 +7,7 @@
 - ✅ **字幕条(bar)可调**:菜单"布局编辑"开关 → bar 变可交互 + 可拖(关闭恢复点击穿透);位置存 `ls.barX/Y`;宽度用菜单滑条(`store.barWidth`,600–1400)。
 - ✅ **小窗缩放**:mini panel 原生 `.resizable`,内容自适应,尺寸存 `ls.miniW/miniH`。
 - ✅ **开 app 即请求权限**:`AppDelegate.applicationDidFinishLaunching` → `PermissionsManager.requestAllOnLaunch()`(麦克风 `AVCaptureDevice.requestAccess` + 屏幕录制 `CGRequestScreenCaptureAccess`)。**不是**挂菜单 `.task`(那要等点开菜单才触发)。
-- ⏳ **待真机验证**:bar 拖动/宽度、mini 边缘缩放、启动权限框弹出时机(borderless panel 边缘缩放的手感尤其需要肉眼确认)。
+- ✅ **真机验证通过**(2026-07-30 用户手测):bar 拖动/宽度、mini 边缘缩放、启动权限框弹出均正常。
 - (原计划遗留,仍 deferred)回声/外放漏音兜底(**已决策:关 VoiceProcessing + 耳机**,见 probes/RESULTS.md)、音频路由变化处理、延迟调优 spike。
 
 ## Phase 5(新子系统)— Obsidian 导出 + DeepSeek 总结 + 设置页 ✅ 代码已实现(2026-07-13)
@@ -19,7 +19,7 @@
 - ✅ **编排** `Export/ExportCoordinator.swift`:取终句 → 有 key 调 DeepSeek(失败/无 key 回退默认标题 + 占位 summary,**仍导出**)→ `Task.detached` 写盘。菜单按钮"整理并导出到 Obsidian"触发,状态显示在菜单。**手动触发**(尊重"主动导出才上云"的隐私边界)。
 - ✅ **设置页** `Overlay/SettingsView.swift` + App `Settings` scene(菜单"设置…"用 `openSettings()` 打开):`SecureField` 配 DeepSeek key、`NSOpenPanel` 选 vault 目录。
 - ⚠️ **API key 存 UserDefaults 明文**(自用可接受;未来上架/沙盒 → Keychain)。
-- ⏳ **待真机验证**:设置页打开、选目录、真实 DeepSeek 调用 + 写出 .md(需你填真 key + 选 vault)。
+- ✅ **真机验证通过**(2026-07-30 用户手测):设置页、选 vault 目录、导出流程均正常。
 
 **已定决策(2026-07-09 与用户确认):**
 
@@ -29,8 +29,16 @@
 - **设置页**:至少含 DeepSeek API key、Obsidian vault 路径。
 - 笔记内容形态待细化:frontmatter(title/date/tags/来源)+ 转录(对方/我)+ DeepSeek 总结段。导出触发时机(停止字幕后?手动按钮?)待 brainstorm。
 
-## 当前进行 / 状态(2026-07-13)
+## 状态(2026-07-30)
 
-- **Phase 3**(branch `phase3-overlay`,5 commits,18→19 测试绿):代码完成;**Task 6 真机手测仍未做**(你的活)。未合并 main。
-- **Phase 4 + 5**(branch `phase4-5-perms-bar-obsidian`,基于 phase3-overlay,6 commits,19 测试绿,bundle OK):代码完成、编译测试通过;**真机手测未做**。未合并 main。
-- **待你决定**:①Phase 3/4/5 真机验收顺序;②验收 OK 后如何合 main(整条 stack 合,还是逐 phase)。
+**Phase 3 + 4 + 5 全部完成并经用户真机验收**(功能正常),0 error / 31 XCTest 绿 / bundle 带图标。
+分支 `phase4-5-perms-bar-obsidian`(基于 `phase3-overlay`)共 19 commits,待合入 `main`。
+实现与后续变更明细见 `plans/2026-07-13-livesubtitle-phase4-5-impl.md`。
+
+## 后续可做(未排期)
+
+- **翻译上下文**:本地逐句翻译无上下文,代词/专名前后不一致——要破得上云 LLM,与"实时链路全本地"冲突,暂不做。
+- **Keychain 存 API key**(替换 UserDefaults 明文),上架/沙盒化时必做。
+- **显示器热插拔时重定位已显示浮窗**(监听 `didChangeScreenParametersNotification`)。
+- **延迟调优 spike**:量化端到端延迟(spec §1 有 6 个指标),看边说边译开/关的实际差异。
+- 音频路由变化处理(切换耳机/外放中途)。
