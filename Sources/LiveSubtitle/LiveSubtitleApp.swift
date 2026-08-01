@@ -11,10 +11,6 @@ struct LiveSubtitleApp: App {
     @State private var exportStatus = ""
     @State private var isExporting = false
 
-    // 启动即请求权限(麦克风 + 屏幕录制)——用 AppDelegate 的 applicationDidFinishLaunching,
-    // 而非菜单内容的 .task(后者要等用户点开菜单才触发)。
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-
     @Environment(\.openSettings) private var openSettings
 
     var body: some Scene {
@@ -119,6 +115,10 @@ struct LiveSubtitleApp: App {
         if running {
             engine?.stop(); engine = nil; overlay.hide(); running = false; status = ""
         } else {
+            // 权限在此刻(真正要用时)请求,不在启动时。
+            // 启动阶段同时拉起麦克风 + 屏幕录制两个 TCC 流程会导致 MenuBarExtra 的状态栏项建不出来
+            // (实测:单独请求任一项都正常,两项同时请求则菜单栏无图标,延后请求也无效)。
+            PermissionsManager.requestAll()
             let e = CaptionEngine(store: store)
             engine = e
             overlay.show(store: store)
@@ -128,9 +128,3 @@ struct LiveSubtitleApp: App {
     }
 }
 
-/// 启动即请求 麦克风 + 屏幕录制 授权(不等到点"开始字幕",也不等用户点开菜单)。
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        PermissionsManager.requestAllOnLaunch()
-    }
-}
