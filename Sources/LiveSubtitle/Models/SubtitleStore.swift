@@ -4,15 +4,50 @@ import Observation
 @MainActor
 @Observable
 final class SubtitleStore {
+    private let defaults: UserDefaults
     private(set) var lines: [SubtitleLine] = []      // 全量内存历史(不落盘)
-    var displayMode: DisplayMode = .both             // Phase 1 固定
-    var overlayMode: OverlayMode = .bar
 
-    /// 每个 speaker 的"当前未定稿灰字行"索引;定稿后清除。
-    private var volatileIndex: [Speaker: Int] = [:]
+    var displayMode: DisplayMode { didSet { defaults.set(displayMode.rawValue, forKey: "ls.displayMode") } }
+    var overlayMode: OverlayMode { didSet { defaults.set(overlayMode.rawValue, forKey: "ls.overlayMode") } }
+    var opacity: Double { didSet { defaults.set(opacity, forKey: "ls.opacity") } }
+    var fontSize: Double { didSet { defaults.set(fontSize, forKey: "ls.fontSize") } }
+    var pinned: Bool { didSet { defaults.set(pinned, forKey: "ls.pinned") } }
+    var barWidth: Double { didSet { defaults.set(barWidth, forKey: "ls.barWidth") } }
+    var deepSeekAPIKey: String { didSet { defaults.set(deepSeekAPIKey, forKey: "ls.deepSeekKey") } }
+    var obsidianVaultPath: String { didSet { defaults.set(obsidianVaultPath, forKey: "ls.vaultPath") } }
+    /// 边说边译:对未定稿的中间态也翻译(降延迟,代价是译文会随句子生长而跳变)。
+    var translateVolatile: Bool { didSet { defaults.set(translateVolatile, forKey: "ls.translateVolatile") } }
+
+    /// 布局编辑态,瞬态(不持久化),启动永远 false。
+    var layoutEditing: Bool = false
+
+    /// 每个 speaker 的"当前未定稿灰字行"id;定稿后清除。
+    /// 用 id(而非绝对下标),这样截断旧行后仍能正确定位,不会失效或错位。
+    private var volatileIndex: [Speaker: UUID] = [:]
+
+    /// id → lines 下标,O(1) 定位;避免每次终句翻译回填做 O(n) firstIndex 扫描。截断时重建。
+    private var indexByID: [UUID: Int] = [:]
 
     /// 每个 speaker 的暂存中间态,尚未上屏(由节流器 flush)。
     private var pendingVolatile: [Speaker: String] = [:]
+
+    /// 保留的最大行数上限;超出则从最旧行开始丢弃,避免长会话内存/渲染无界增长。
+    /// 取值足够大,正常通话/会议不会触及;导出用当前保留的行(极长会话会丢最早的回看历史)。
+    private let maxLines = 2000
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        displayMode = DisplayMode(rawValue: defaults.string(forKey: "ls.displayMode") ?? "") ?? .both
+        overlayMode = OverlayMode(rawValue: defaults.string(forKey: "ls.overlayMode") ?? "") ?? .bar
+        opacity = defaults.object(forKey: "ls.opacity") as? Double ?? 0.82
+        fontSize = defaults.object(forKey: "ls.fontSize") as? Double ?? 22
+        pinned = defaults.bool(forKey: "ls.pinned")
+        barWidth = defaults.object(forKey: "ls.barWidth") as? Double ?? 900
+        deepSeekAPIKey = defaults.string(forKey: "ls.deepSeekKey") ?? ""
+        obsidianVaultPath = defaults.string(forKey: "ls.vaultPath") ?? ""
+        translateVolatile = defaults.object(forKey: "ls.translateVolatile") as? Bool ?? true
+        layoutEditing = false
+    }
 
     /// 暂存中间态,不立即上屏(由节流器 flush)。
     func stageVolatile(speaker: Speaker, text: String) {
@@ -28,11 +63,12 @@ final class SubtitleStore {
     }
 
     func upsertVolatile(speaker: Speaker, text: String) {
-        if let i = volatileIndex[speaker] {
+        if let id = volatileIndex[speaker], let i = index(of: id) {
             lines[i].original = text
         } else {
-            lines.append(SubtitleLine(speaker: speaker, original: text, isFinal: false))
-            volatileIndex[speaker] = lines.count - 1
+            let line = SubtitleLine(speaker: speaker, original: text, isFinal: false)
+            append(line)
+            volatileIndex[speaker] = line.id
         }
     }
 
@@ -40,20 +76,67 @@ final class SubtitleStore {
     @discardableResult
     func commitFinal(speaker: Speaker, text: String) -> UUID {
         pendingVolatile[speaker] = nil   // 定稿后丢弃陈旧暂存中间态
-        if let i = volatileIndex[speaker] {
+        if let id = volatileIndex[speaker], let i = index(of: id) {
             lines[i].original = text
             lines[i].isFinal = true
             volatileIndex[speaker] = nil
-            return lines[i].id
+            return id
         } else {
             let line = SubtitleLine(speaker: speaker, original: text, isFinal: true)
-            lines.append(line)
+            append(line)
             return line.id
         }
     }
 
     func attachTranslation(id: UUID, zh: String) {
-        guard let i = lines.firstIndex(where: { $0.id == id }) else { return }
+        guard let i = index(of: id) else { return }
         lines[i].translated = zh
+        lines[i].translationFailed = false      // 成功则清除任何旧的失败标记
+        lines[i].translationProvisional = false // 定稿译文,不再是临时半句
+    }
+
+    /// 翻译尝试失败:打标记,UI 据此回退显原文而非永久「翻译中…」或残留的半句译文。
+    /// 未翻译(nil)或仅有中间态临时译文(provisional)时都视为失败并清掉临时译文。
+    func markTranslationFailed(id: UUID) {
+        guard let i = index(of: id) else { return }
+        if lines[i].translated == nil || lines[i].translationProvisional {
+            lines[i].translated = nil
+            lines[i].translationProvisional = false
+            lines[i].translationFailed = true
+        }
+    }
+
+    /// 当前某 speaker 未定稿中间态的原文(供边说边译读取);无则 nil。
+    func currentVolatileText(speaker: Speaker) -> String? {
+        guard let id = volatileIndex[speaker], let i = index(of: id) else { return nil }
+        return lines[i].original
+    }
+
+    /// 回填中间态译文:仅当该 speaker 的中间态行仍存在、仍未定稿、且原文未变(== sourceText)时才应用,
+    /// 避免把过期片段的译文贴到已被新内容替换或已定稿的行上。
+    func attachVolatileTranslation(speaker: Speaker, sourceText: String, zh: String) {
+        guard let id = volatileIndex[speaker], let i = index(of: id),
+              !lines[i].isFinal, lines[i].original == sourceText else { return }
+        lines[i].translated = zh
+        lines[i].translationProvisional = true   // 半句临时译文;终句译文到位或失败时会被覆盖/清除
+    }
+
+    // MARK: - 内部:索引维护 + 截断
+
+    private func index(of id: UUID) -> Int? { indexByID[id] }
+
+    /// 追加一行,维护 indexByID,并在超限时截断。
+    private func append(_ line: SubtitleLine) {
+        lines.append(line)
+        indexByID[line.id] = lines.count - 1
+        trimIfNeeded()
+    }
+
+    /// 超过上限则丢弃最旧的行并重建 indexByID。当前未定稿行总在尾部,不会被丢。
+    private func trimIfNeeded() {
+        guard lines.count > maxLines else { return }
+        lines.removeFirst(lines.count - maxLines)
+        indexByID.removeAll(keepingCapacity: true)
+        for (i, line) in lines.enumerated() { indexByID[line.id] = i }
     }
 }
