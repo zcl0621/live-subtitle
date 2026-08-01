@@ -29,7 +29,6 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1</string>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
-  <key>LSUIElement</key><true/>
   <key>NSScreenCaptureUsageDescription</key><string>LiveSubtitle 采集系统音频用于实时中文字幕(仅音频)。</string>
   <key>NSMicrophoneUsageDescription</key><string>LiveSubtitle 采集麦克风用于识别你的发言。</string>
 </dict>

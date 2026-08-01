@@ -14,19 +14,19 @@ struct LiveSubtitleApp: App {
     @Environment(\.openSettings) private var openSettings
 
     var body: some Scene {
-        // .window 样式:下拉是真正的 SwiftUI 面板,滑块能正常渲染并拖动
-        // (默认 .menu 走原生 NSMenu,Slider 会退化成 Decrement/Increment 子菜单)
-        MenuBarExtra("LiveSubtitle", systemImage: "captions.bubble") {
-            menuPanel
+        // 普通窗口 app(不再是菜单栏 app):控制面板是一个正常窗口,Dock 里有图标。
+        // 字幕本身仍是独立浮窗(OverlayController 的 bar/mini),与本窗口无关。
+        WindowGroup("LiveSubtitle") {
+            controlPanel
         }
-        .menuBarExtraStyle(.window)
+        .windowResizability(.contentSize)
 
         Settings {
             SettingsView(store: store)
         }
     }
 
-    @ViewBuilder private var menuPanel: some View {
+    @ViewBuilder private var controlPanel: some View {
         @Bindable var s = store
         VStack(alignment: .leading, spacing: 12) {
             Button(running ? "停止字幕" : "开始字幕") { toggle() }
@@ -69,17 +69,10 @@ struct LiveSubtitleApp: App {
             if !exportStatus.isEmpty {
                 Text(exportStatus).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
-            HStack {
-                Button("设置…") {
-                    NSApp.activate(ignoringOtherApps: true)   // 菜单栏触发时确保设置窗口置前获焦
-                    openSettings()
-                }
-                Spacer()
-                Button("退出") { NSApplication.shared.terminate(nil) }
-            }
+            Button("设置…") { openSettings() }   // 退出走 app 菜单 / ⌘Q
         }
-        .padding(14)
-        .frame(width: 280)
+        .padding(16)
+        .frame(width: 300)
     }
 
     /// 带右侧数值的紧凑滑块行(.window 样式下 Slider 正常可用)。
