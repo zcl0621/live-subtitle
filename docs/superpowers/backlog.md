@@ -4,10 +4,10 @@
 
 ## Phase 4 — 字幕条可操作 + 权限前置 ✅ 代码已实现(2026-07-13,branch phase4-5-perms-bar-obsidian)
 
-- ✅ **字幕条(bar)可调**:菜单"布局编辑"开关 → bar 变可交互 + 可拖(关闭恢复点击穿透);位置存 `ls.barX/Y`;宽度用菜单滑条(`store.barWidth`,600–1400)。
+- ✅ **字幕条(bar)可调**:"布局编辑"开关 → bar 变可交互 + 可拖(关闭恢复点击穿透);位置存 `ls.barX/Y`;宽度用滑块(`store.barWidth`,600–1400)。
 - ✅ **小窗缩放**:mini panel 原生 `.resizable`,内容自适应,尺寸存 `ls.miniW/miniH`。
-- ✅ **开 app 即请求权限**:`AppDelegate.applicationDidFinishLaunching` → `PermissionsManager.requestAllOnLaunch()`(麦克风 `AVCaptureDevice.requestAccess` + 屏幕录制 `CGRequestScreenCaptureAccess`)。**不是**挂菜单 `.task`(那要等点开菜单才触发)。
-- ✅ **真机验证通过**(2026-07-30 用户手测):bar 拖动/宽度、mini 边缘缩放、启动权限框弹出均正常。
+- ❌ **「开 app 即请求权限」已撤销**(2026-07-30):改为**点「开始字幕」时**才调 `PermissionsManager.requestAll()`。启动阶段拉起 TCC 授权流程与菜单栏图标问题纠缠不清,且点用时请求本就是 macOS 惯例。
+- ✅ **真机验证通过**(2026-07-30 用户手测):bar 拖动/宽度、mini 缩放、控制面板、导出、设置页均正常。
 - (原计划遗留,仍 deferred)回声/外放漏音兜底(**已决策:关 VoiceProcessing + 耳机**,见 probes/RESULTS.md)、音频路由变化处理、延迟调优 spike。
 
 ## Phase 5(新子系统)— Obsidian 导出 + DeepSeek 总结 + 设置页 ✅ 代码已实现(2026-07-13)
@@ -28,6 +28,17 @@
 - **隐私边界(用户认可):** 实时字幕链路 **100% 保持本地**(STT + 翻译不变);**只有"主动导出整理进 Obsidian"这一步**把转录发 DeepSeek 云。可选:总结那步也能换本地 LLM(Ollama/Apple 基础模型),但当前按 DeepSeek 做。
 - **设置页**:至少含 DeepSeek API key、Obsidian vault 路径。
 - 笔记内容形态待细化:frontmatter(title/date/tags/来源)+ 转录(对方/我)+ DeepSeek 总结段。导出触发时机(停止字幕后?手动按钮?)待 brainstorm。
+
+## ⚠️ 形态变更:菜单栏 app → 普通窗口 app(2026-07-30)
+
+PRD/Phase 3 原定"菜单栏驱动"(`MenuBarExtra`),**已改为普通窗口 app**。原因:
+
+- 从 `/Applications` 经访达/LaunchServices 启动时,**菜单栏图标始终不出现**:AX 显示状态项已注册、app 事件循环正常、无崩溃、无任何日志输出,但就是不绘制;从 shell 直接起有时可见,从访达起不可见。
+- 用最小 SwiftUI 测试 app 做过多轮二分(符号有效性、`.menu`/`.window` 样式、`Settings` 场景、`@NSApplicationDelegateAdaptor`、两项权限请求的组合、全新 bundle id 复现首次启动)。一度以为是"启动时同时请求麦克风+屏幕录制"所致,**该结论后被证伪**(去掉权限请求仍不显示)。
+- **根因未查明**,故不再纠缠:改为 `WindowGroup` 控制面板窗口 + 去掉 `LSUIElement`。附带好处是有了 Dock 图标(`.icns` 派上用场)和标准 app 菜单(⌘Q/⌘,)。
+- 字幕浮窗(bar/mini `NSPanel`)不受影响,仍是独立浮层。
+
+> 若以后想回菜单栏形态:`MenuBarExtra` 相关代码见 commit `9db803f` 之前的版本;需先解决上述"状态项注册但不绘制"的问题。
 
 ## 状态(2026-07-30)
 

@@ -38,6 +38,16 @@
 | `5bfdfe8` | 字幕条大字号不再被裁(底对齐)+ 属性变化就地更新(消除重建闪烁) |
 | `9f1e86c` → `7c52a9a` | 外观控件位置:先试字幕条旁齿轮浮窗 → 用户判定不好看,**改回菜单栏并换 `.menuBarExtraStyle(.window)`**(原生 NSMenu 渲染不了滑块,会退化成 Decrement/Increment) |
 | `97cc9dd` | 应用图标:`scripts/make-icon.swift` 纯 AppKit 生成 `.icns`(bars/cjk/mixed 三风格,默认 cjk)接入 bundle |
+| `32b9996` | 权限请求从启动时移到「开始字幕」时(见下方"菜单栏图标"一节;该 commit 的根因判断后被证伪,但**改动本身保留**——点用时请求是更合理的 macOS 惯例) |
+| `9db803f` | **形态变更:菜单栏 app → 普通窗口 app**(`WindowGroup` + 去掉 `LSUIElement`) |
+
+## 菜单栏图标失踪(未解之谜 → 绕开)
+
+装到 `/Applications` 经访达启动后,菜单栏图标始终不出现,且**完全静默**:AX 显示状态项已注册、`NSApplicationMain` 事件循环正常、无崩溃、无 stderr、无系统日志。
+
+排查手段(留档,免得以后重走):`sample` 抓主线程栈确认没卡死;`lsappinfo`(**参数用错过一次,输出不可信**);System Events 读菜单栏结构(**accessory app 的 AX 标题是假象,最小对照 app 同样乱**);`screencapture`(无屏录权限,拿不到图);最后靠**最小 SwiftUI 测试 app + 用户肉眼**做二分:符号有效性 ✓、`.menu`/`.window` 样式 ✓、`Settings` 场景 ✓、`@NSApplicationDelegateAdaptor` ✓、全新 bundle id 复现首次启动。
+
+一度定位到"启动时同时请求麦克风 + 屏幕录制",但**该结论被后续验证证伪**(去掉权限请求后,访达启动的实例仍无图标)。**根因至今未查明**,遂改用普通窗口形态绕开。
 
 **期间做了两轮多 agent 代码复审**(5 个 commit 逐一审 + 6 个子系统全量审),真 bug 都已修并有单测覆盖;被复审排除的疑点见各 commit message。
 
