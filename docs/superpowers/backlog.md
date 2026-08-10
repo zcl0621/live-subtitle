@@ -29,6 +29,31 @@
 - **设置页**:至少含 DeepSeek API key、Obsidian vault 路径。
 - 笔记内容形态待细化:frontmatter(title/date/tags/来源)+ 转录(对方/我)+ DeepSeek 总结段。导出触发时机(停止字幕后?手动按钮?)待 brainstorm。
 
+## Phase 6(新子系统)— 声纹说话人识别 📋 spec + plan 已出(2026-08-10),待跑探针
+
+**问题:** 现在 `Speaker = { me, other }` 等价于「麦克风轨 / 系统音轨」,但**两条轨都可能有多人**(会议室里同事、远端多个参会者)。
+
+**已定决策(2026-08-10 与用户确认):**
+
+- **选型 = [FluidInference/FluidAudio](https://github.com/FluidInference/FluidAudio)**(Apache-2.0,纯 Swift + CoreML 走 ANE,macOS 14+)。**不接三方云**。
+- **只用 `extractEmbedding()`,不跑完整 diarization。** 终句自带 `audioTimeRange`(现有 pipeline 已开该 attribute),直接切那段音频抽一个声纹向量即可 —— 省 segmentation 算力,且天然与字幕行对齐,不需要「时间线 → 句子」映射。代价:句内抢话整句归一人(已接受)。
+- **用户约束:不跨语言匹配;「我」的声纹中英各录一份;一个会议只有一种语言;中文会议不翻译。**
+  - → 这消除了跨语言 drift 问题,**sherpa-onnx + CAM++ 中英模型的备选方案因此否决**(其唯一优势就是跨语言鲁棒,代价是引 onnxruntime + C++ 依赖)。
+  - → 也**顺带把 ASR 语种缺陷降级**:不用 code-switching / 4 个 analyzer,只要一个会话级语种开关(现状 `SpeechTranscriber` 写死 `en-US`,中文会议会出乱码)。
+- **Apple 原生无 diarization** —— `SpeechAnalyzer` 只有 `SpeechTranscriber`/`DictationTranscriber`/`SpeechDetector`,确认没有说话人分离模块。
+- **关键架构切分:`Speaker` 按职责一分为二** —— `Track { mic, system }`(路由用,承接旧枚举在「每轨状态字典键」上的角色,值域仍是 2、逻辑不动)+ `SpeakerID`(显示用,带 me/cluster/unresolved)。中间态按轨占位、终句按声纹回填(复用 `attachTranslation` 的回填模式)。**这个切分把重构面从「8 个源文件全改」压到「只有 `SubtitleLine.speaker` 升级」。**
+- **架构对冲:** 抽 embedding 放 `VoiceprintExtractor` protocol 后面。FluidAudio 用的是 WeSpeaker ResNet34-LM(VoxCeleb 英文训练),**中文判别力是已知残留风险**,若 P6a 实测不合格,换 CAM++ 只动一个实现类。
+
+**前置 KILL 闸门(未跑):** P6a FluidAudio 中英区分度 + 阈值标定;P7 `SpeechTranscriber` zh-CN 支持与模型下载。P6b 推理负载为 DEGRADE。
+
+**接线参考:** [Marvinngg/ambient-voice](https://github.com/Marvinngg/ambient-voice)(MIT)—— 同技术栈(Apple SpeechAnalyzer + FluidAudio),可直接抄。
+
+**顺带收益:** 「我」不再等于麦克风轨后,**外放漏音这个已知限制被治好** —— 对方的声音从喇叭漏进麦克风,以前会被错标成蓝色「我」,声纹一比对就知道不是。
+
+> spec:`specs/2026-08-10-livesubtitle-phase6-voiceprint-design.md`
+> plan:`plans/2026-08-10-livesubtitle-phase6-voiceprint.md`
+> ⚠️ 两份文档均在无 Swift 工具链的 Linux 环境撰写,**代码零编译验证**;涉及 FluidAudio API 的部分签名取自其文档而非源码,首次 build 必然要修。文档内已逐处标注置信度。
+
 ## ⚠️ 形态变更:菜单栏 app → 普通窗口 app(2026-07-30)
 
 PRD/Phase 3 原定"菜单栏驱动"(`MenuBarExtra`),**已改为普通窗口 app**。原因:
