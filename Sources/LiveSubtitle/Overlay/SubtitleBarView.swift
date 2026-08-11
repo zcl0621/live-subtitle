@@ -7,10 +7,11 @@ struct SubtitleLineRow: View {
     let fontSize: Double
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Text(line.speaker == .me ? "我" : "对方")
+            // Task 8 会替换成真身份文案/配色;当前按轨给出与旧 Speaker 一致的显示
+            Text(line.speaker.track == .mic ? "我" : "对方")
                 .font(.system(size: 12, weight: .medium))
                 .padding(.horizontal, 7).padding(.vertical, 2)
-                .background(line.speaker == .me ? Color.blue : Color.orange)
+                .background(line.speaker.track == .mic ? Color.blue : Color.orange)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             VStack(alignment: .leading, spacing: 3) {
                 if displayMode.showsOriginal {

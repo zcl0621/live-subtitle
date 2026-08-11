@@ -3,13 +3,13 @@ import Foundation
 @MainActor
 final class CaptionEngine {
     let store: SubtitleStore
-    private struct Track { let source: AudioSource; let pipeline: TranscriptionPipeline; let translator: TranslationService }
-    private var tracks: [Track]
+    private struct TrackBundle { let source: AudioSource; let pipeline: TranscriptionPipeline; let translator: TranslationService }
+    private var tracks: [TrackBundle]
     private var tasks: [Task<Void, Never>] = []
     private var flushTask: Task<Void, Never>?
     private var volatileTranslateTask: Task<Void, Never>?
-    private var lastVolatileSource: [Speaker: String] = [:]   // 每 speaker 上次已送翻译的中间态,去重
-    private var volatileInFlight: Set<Speaker> = []           // 每 speaker 是否有中间态翻译在途,防叠
+    private var lastVolatileSource: [Track: String] = [:]   // 每轨上次已送翻译的中间态,去重
+    private var volatileInFlight: Set<Track> = []           // 每轨是否有中间态翻译在途,防叠
     private var stopped = false                               // stop 后为 true,阻止旧 consume 继续写共享 store
 
     /// 默认双轨:对方(系统音)+ 我(麦克风)。测试可注入自定义轨。
@@ -19,7 +19,7 @@ final class CaptionEngine {
             (SystemAudioSource(), TranscriptionPipeline()),
             (MicSource(), TranscriptionPipeline()),
         ]
-        self.tracks = built.map { Track(source: $0.0, pipeline: $0.1, translator: TranslationService()) }
+        self.tracks = built.map { TrackBundle(source: $0.0, pipeline: $0.1, translator: TranslationService()) }
     }
 
     func start(onError: @escaping @MainActor (String) -> Void) {
@@ -44,8 +44,8 @@ final class CaptionEngine {
                         for await e in events {
                             if stopped { break }   // stop 后不再写共享 store(防旧会话污染快速重启的新会话)
                             if e.isFinal {
-                                let id = store.commitFinal(speaker: track.source.speaker, text: e.text)
-                                lastVolatileSource[track.source.speaker] = nil   // 定稿后清去重,下句同短语也能边说边译
+                                let id = store.commitFinal(track: track.source.track, text: e.text)
+                                lastVolatileSource[track.source.track] = nil   // 定稿后清去重,下句同短语也能边说边译
                                 if store.displayMode.showsTranslated {   // 原文模式不触发翻译(省资源,对齐 PRD)
                                     Task { @MainActor in
                                         if let zh = await track.translator.translate(e.text) {
@@ -56,7 +56,7 @@ final class CaptionEngine {
                                     }
                                 }
                             } else {
-                                store.stageVolatile(speaker: track.source.speaker, text: e.text)
+                                store.stageVolatile(track: track.source.track, text: e.text)
                             }
                         }
                     }
@@ -79,23 +79,23 @@ final class CaptionEngine {
             }
         }
         // 边说边译:每 ~450ms 把当前中间态送翻译(受 translateVolatile + displayMode 门控;
-        // 每 speaker 内容未变则跳过、在途则不叠;译文经 attachVolatileTranslation 守卫回填)。
+        // 每轨内容未变则跳过、在途则不叠;译文经 attachVolatileTranslation 守卫回填)。
         volatileTranslateTask = Task { @MainActor in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(450))
                 guard store.translateVolatile, store.displayMode.showsTranslated else { continue }
                 for track in tracks {
-                    let sp = track.source.speaker
-                    guard !volatileInFlight.contains(sp),
-                          let text = store.currentVolatileText(speaker: sp),
-                          !text.isEmpty, text != lastVolatileSource[sp] else { continue }
-                    lastVolatileSource[sp] = text
-                    volatileInFlight.insert(sp)
+                    let tr = track.source.track
+                    guard !volatileInFlight.contains(tr),
+                          let text = store.currentVolatileText(track: tr),
+                          !text.isEmpty, text != lastVolatileSource[tr] else { continue }
+                    lastVolatileSource[tr] = text
+                    volatileInFlight.insert(tr)
                     let translator = track.translator
                     Task { @MainActor in
                         let zh = await translator.translate(text)
-                        volatileInFlight.remove(sp)
-                        if let zh { store.attachVolatileTranslation(speaker: sp, sourceText: text, zh: zh) }
+                        volatileInFlight.remove(tr)
+                        if let zh { store.attachVolatileTranslation(track: tr, sourceText: text, zh: zh) }
                     }
                 }
             }

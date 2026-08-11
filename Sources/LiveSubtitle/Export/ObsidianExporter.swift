@@ -78,10 +78,11 @@ enum ObsidianExporter {
 
     // MARK: - Helpers
 
-    private static func displayName(for speaker: Speaker) -> String {
-        switch speaker {
-        case .me: return "我"
-        case .other: return "对方"
+    // Task 8 会替换成真身份文案;当前按轨给出与旧 Speaker 一致的显示
+    private static func displayName(for speaker: SpeakerID) -> String {
+        switch speaker.track {
+        case .mic: return "我"
+        case .system: return "对方"
         }
     }
 

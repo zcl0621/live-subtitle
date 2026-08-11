@@ -5,7 +5,7 @@ import AVFoundation
 /// 变多声道致静音、压低扬声器输出、还会掐 ScreenCaptureKit 的系统音轨,且并不能消掉别的 app 从扬声器
 /// 放出来的对方声。外放漏音靠耳机兜底(通话推荐戴耳机)。
 final class MicSource: NSObject, AudioSource, @unchecked Sendable {
-    let speaker: Speaker = .me
+    let track: Track = .mic
     var onError: (@Sendable (String) -> Void)?
     private let engine = AVAudioEngine()
     private let converter = FormatConverter()
@@ -24,7 +24,7 @@ final class MicSource: NSObject, AudioSource, @unchecked Sendable {
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buf, _ in
             guard let self, let mono = Self.channelZeroMono(buf),
                   let samples = try? self.converter.convert(mono) else { return }
-            self.continuation?.yield(AudioFrame(pcm: samples, speaker: .me, hostTime: mach_absolute_time()))
+            self.continuation?.yield(AudioFrame(pcm: samples, track: .mic, hostTime: mach_absolute_time()))
         }
         engine.prepare()
         do { try engine.start() }

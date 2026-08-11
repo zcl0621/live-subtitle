@@ -21,15 +21,15 @@ final class SubtitleStore {
     /// 布局编辑态,瞬态(不持久化),启动永远 false。
     var layoutEditing: Bool = false
 
-    /// 每个 speaker 的"当前未定稿灰字行"id;定稿后清除。
+    /// 每条轨的"当前未定稿灰字行"id;定稿后清除。
     /// 用 id(而非绝对下标),这样截断旧行后仍能正确定位,不会失效或错位。
-    private var volatileIndex: [Speaker: UUID] = [:]
+    private var volatileIndex: [Track: UUID] = [:]
 
     /// id → lines 下标,O(1) 定位;避免每次终句翻译回填做 O(n) firstIndex 扫描。截断时重建。
     private var indexByID: [UUID: Int] = [:]
 
-    /// 每个 speaker 的暂存中间态,尚未上屏(由节流器 flush)。
-    private var pendingVolatile: [Speaker: String] = [:]
+    /// 每条轨的暂存中间态,尚未上屏(由节流器 flush)。
+    private var pendingVolatile: [Track: String] = [:]
 
     /// 保留的最大行数上限;超出则从最旧行开始丢弃,避免长会话内存/渲染无界增长。
     /// 取值足够大,正常通话/会议不会触及;导出用当前保留的行(极长会话会丢最早的回看历史)。
@@ -50,39 +50,39 @@ final class SubtitleStore {
     }
 
     /// 暂存中间态,不立即上屏(由节流器 flush)。
-    func stageVolatile(speaker: Speaker, text: String) {
-        pendingVolatile[speaker] = text
+    func stageVolatile(track: Track, text: String) {
+        pendingVolatile[track] = text
     }
 
     /// 把所有暂存的中间态一次性上屏。
     func flushVolatile() {
-        for (speaker, text) in pendingVolatile {
-            upsertVolatile(speaker: speaker, text: text)
+        for (track, text) in pendingVolatile {
+            upsertVolatile(track: track, text: text)
         }
         pendingVolatile.removeAll()
     }
 
-    func upsertVolatile(speaker: Speaker, text: String) {
-        if let id = volatileIndex[speaker], let i = index(of: id) {
+    func upsertVolatile(track: Track, text: String) {
+        if let id = volatileIndex[track], let i = index(of: id) {
             lines[i].original = text
         } else {
-            let line = SubtitleLine(speaker: speaker, original: text, isFinal: false)
+            let line = SubtitleLine(speaker: .unresolved(track), original: text, isFinal: false)
             append(line)
-            volatileIndex[speaker] = line.id
+            volatileIndex[track] = line.id
         }
     }
 
     /// 把当前灰字行原地提升为终句(同 id)。若无灰字行则新建一条终句。返回该行 id。
     @discardableResult
-    func commitFinal(speaker: Speaker, text: String) -> UUID {
-        pendingVolatile[speaker] = nil   // 定稿后丢弃陈旧暂存中间态
-        if let id = volatileIndex[speaker], let i = index(of: id) {
+    func commitFinal(track: Track, text: String) -> UUID {
+        pendingVolatile[track] = nil   // 定稿后丢弃陈旧暂存中间态
+        if let id = volatileIndex[track], let i = index(of: id) {
             lines[i].original = text
             lines[i].isFinal = true
-            volatileIndex[speaker] = nil
+            volatileIndex[track] = nil
             return id
         } else {
-            let line = SubtitleLine(speaker: speaker, original: text, isFinal: true)
+            let line = SubtitleLine(speaker: .unresolved(track), original: text, isFinal: true)
             append(line)
             return line.id
         }
@@ -106,16 +106,16 @@ final class SubtitleStore {
         }
     }
 
-    /// 当前某 speaker 未定稿中间态的原文(供边说边译读取);无则 nil。
-    func currentVolatileText(speaker: Speaker) -> String? {
-        guard let id = volatileIndex[speaker], let i = index(of: id) else { return nil }
+    /// 当前某轨未定稿中间态的原文(供边说边译读取);无则 nil。
+    func currentVolatileText(track: Track) -> String? {
+        guard let id = volatileIndex[track], let i = index(of: id) else { return nil }
         return lines[i].original
     }
 
-    /// 回填中间态译文:仅当该 speaker 的中间态行仍存在、仍未定稿、且原文未变(== sourceText)时才应用,
+    /// 回填中间态译文:仅当该轨的中间态行仍存在、仍未定稿、且原文未变(== sourceText)时才应用,
     /// 避免把过期片段的译文贴到已被新内容替换或已定稿的行上。
-    func attachVolatileTranslation(speaker: Speaker, sourceText: String, zh: String) {
-        guard let id = volatileIndex[speaker], let i = index(of: id),
+    func attachVolatileTranslation(track: Track, sourceText: String, zh: String) {
+        guard let id = volatileIndex[track], let i = index(of: id),
               !lines[i].isFinal, lines[i].original == sourceText else { return }
         lines[i].translated = zh
         lines[i].translationProvisional = true   // 半句临时译文;终句译文到位或失败时会被覆盖/清除
