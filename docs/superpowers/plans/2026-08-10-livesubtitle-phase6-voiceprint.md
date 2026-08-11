@@ -9,6 +9,16 @@
 > **凡涉及 FluidAudio API 的部分(Task 5/6)签名取自其文档而非源码,首次 build 必然要修。**
 > 实现顺序已按此风险排布:先把能测的做完做实,再碰不确定的外部依赖。
 
+> **进度(2026-08-11):Task 1–4 已在 macOS 真机落地并通过双重评审**,55 测试全绿
+> (既有 31 + 新增 24)。commit:Task 1 `d77ac76`;Task 2 `2f45f5c`+`9daa237`;
+> Task 3 `c014820`+`b4aed41`;Task 4 `5778223`+`5bcef20`。
+> 下一步是 Task 0 探针(需人工录声纹样本),探针结论出来前**不要动 Task 5–10**。
+> 终审留给 Task 5/6 的两条提醒:
+> ① `SubtitleLine.speaker` 目前是 `let`,Task 6 的 `attachSpeaker` 需要改成 `var`(一词改动);
+> ② `VoiceprintProfile` 未记录 embedding 维度/模型标识 —— Task 5 落地时应补上,
+>   否则将来按 CAM++ 对冲换模型后,旧 `voiceprints.json` 会以维度不匹配的向量
+>   喂进 `cosine`(debug 断言崩、release 静默截断)。
+
 ## 置信度分级
 
 | 级别 | 范围 | 说法 |

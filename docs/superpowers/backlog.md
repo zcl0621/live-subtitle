@@ -29,7 +29,7 @@
 - **设置页**:至少含 DeepSeek API key、Obsidian vault 路径。
 - 笔记内容形态待细化:frontmatter(title/date/tags/来源)+ 转录(对方/我)+ DeepSeek 总结段。导出触发时机(停止字幕后?手动按钮?)待 brainstorm。
 
-## Phase 6(新子系统)— 声纹说话人识别 📋 spec + plan 已出(2026-08-10),待跑探针
+## Phase 6(新子系统)— 声纹说话人识别 🔨 Task 1–4 已落地(2026-08-11),待跑探针(Task 0)再做 Task 5–10
 
 **问题:** 现在 `Speaker = { me, other }` 等价于「麦克风轨 / 系统音轨」,但**两条轨都可能有多人**(会议室里同事、远端多个参会者)。
 
