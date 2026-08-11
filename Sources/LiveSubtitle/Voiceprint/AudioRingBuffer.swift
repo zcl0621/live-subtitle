@@ -24,7 +24,7 @@ final class AudioRingBuffer {
         }
     }
 
-    /// 取 [from, from+count) 的样本;越界(已被覆盖 / 尚未写入)返回 nil。
+    /// 取 [from, from+count) 的样本;越界(已被覆盖 / 尚未写入)返回 nil,count <= 0 亦返回 nil。
     func slice(from: Int, count: Int) -> [Int16]? {
         guard count > 0, from >= earliestAvailable, from + count <= written else { return nil }
         var out = [Int16]()

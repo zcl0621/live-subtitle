@@ -30,6 +30,19 @@ final class AudioRingBufferTests: XCTestCase {
         XCTAssertEqual(buf.slice(from: 6, count: 6), [7,8,9,10,11,12])
     }
 
+    func testEvictionBoundaryFullCapacitySlice() {
+        let buf = AudioRingBuffer(capacity: 10)
+        buf.append([1,2,3,4,5,6,7,8,9,10,11,12])       // 保留序号 2..<12,earliestAvailable == 2
+        XCTAssertEqual(buf.slice(from: 2, count: 10), [3,4,5,6,7,8,9,10,11,12])
+        XCTAssertNil(buf.slice(from: 1, count: 10))    // 刚好越过驱逐边界
+    }
+
+    func testEmptyRangeReturnsNil() {
+        let buf = AudioRingBuffer(capacity: 16000 * 60)
+        buf.append(Array(repeating: 7, count: 16000 * 3))
+        XCTAssertNil(buf.slice(seconds: 1.0..<1.0, sampleRate: 16000))  // count == 0 → nil
+    }
+
     func testTimeRangeConversion() {
         let buf = AudioRingBuffer(capacity: 16000 * 60)
         buf.append(Array(repeating: 7, count: 16000 * 3))
