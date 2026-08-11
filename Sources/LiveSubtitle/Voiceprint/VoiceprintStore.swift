@@ -29,16 +29,25 @@ final class VoiceprintStore {
         load()
     }
 
-    /// 同语言档案覆盖(重录即替换)。
+    /// 同语言档案覆盖(重录即替换)。落盘失败则回滚内存态,
+    /// 避免界面显示「已录制」而重启后又消失。
     func save(_ profile: VoiceprintProfile) throws {
+        let snapshot = profiles
         profiles.removeAll { $0.language == profile.language }
         profiles.append(profile)
-        try persist()
+        do { try persist() } catch {
+            profiles = snapshot
+            throw error
+        }
     }
 
     func remove(language: VoiceprintProfile.Language) throws {
+        let snapshot = profiles
         profiles.removeAll { $0.language == language }
-        try persist()
+        do { try persist() } catch {
+            profiles = snapshot
+            throw error
+        }
     }
 
     /// 供 SpeakerClusterer 用的 embedding 列表(两份都给,匹配时取 max)。

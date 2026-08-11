@@ -98,6 +98,15 @@ final class VoiceprintStoreTests: XCTestCase {
         XCTAssertEqual(store.profiles.map(\.language), [.english])
     }
 
+    // 7b. 合法 JSON 但 schema 不对(非数组)→ 同样降级为空档案
+    func testWrongSchemaJSONDegradesToEmpty() throws {
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let file = tempDir.appendingPathComponent("voiceprints.json")
+        try Data("{}".utf8).write(to: file)
+        let store = try VoiceprintStore(directory: tempDir)
+        XCTAssertTrue(store.profiles.isEmpty)
+    }
+
     // 7. 损坏 JSON 不崩溃且降级为空档案
     func testCorruptFileDegradesToEmpty() throws {
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
