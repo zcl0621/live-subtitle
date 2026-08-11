@@ -35,7 +35,8 @@ final class SpeakerClustererTests: XCTestCase {
     func testBetweenThresholdsIsNotMe() {
         let c = SpeakerClusterer(meProfiles: [basis(0)], thresholdMe: 0.95, thresholdCluster: 0.70)
         let near = blend(basis(0), basis(1), 0.25)   // 与 basis(0) 余弦 ≈0.93
-        XCTAssertNotEqual(c.assign(near, track: .mic).kind, .me)
+        // 落在两阈值之间:不算「我」,落回聚类分支成为第一个簇
+        XCTAssertEqual(c.assign(near, track: .mic).kind, .cluster(0))
     }
 
     func testMeRecognizedOnBothTracks() {

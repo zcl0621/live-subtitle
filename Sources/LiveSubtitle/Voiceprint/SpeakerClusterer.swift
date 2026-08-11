@@ -2,6 +2,7 @@ import Foundation
 
 /// 会话内在线说话人聚类。先比预注册的「我」,再比已有簇,都不中则新建簇。
 /// 输入 embedding 必须已 L2 归一化(FluidAudio 的输出即是)。
+/// 非线程安全;整个实例须留在单一 actor/队列内(Task 6 接线时确认)。
 final class SpeakerClusterer {
     private let meProfiles: [[Float]]
     private let thresholdMe: Float
@@ -52,6 +53,7 @@ final class SpeakerClusterer {
 
     /// 两个已归一化向量的余弦 = 点积。长度不等按较短者截断(防御性)。
     static func cosine(_ a: [Float], _ b: [Float]) -> Float {
+        assert(a.count == b.count, "embedding 维度不一致:\(a.count) vs \(b.count)")
         let n = min(a.count, b.count)
         var dot: Float = 0
         for i in 0..<n { dot += a[i] * b[i] }
