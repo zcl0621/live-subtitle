@@ -6,6 +6,24 @@ struct VoiceprintProfile: Codable, Sendable, Equatable {
     let embedding: [Float]
     let recordedAt: Date
     let durationSeconds: Double
+    /// 产出该 embedding 的声纹模型(如 FluidAudioExtractor.modelID)。
+    /// 换模型后旧档案向量空间不兼容,靠它识别并提示重录。
+    /// Optional:旧 JSON 无此字段照常解码为 nil,免迁移。
+    let modelID: String?
+
+    init(
+        language: Language,
+        embedding: [Float],
+        recordedAt: Date,
+        durationSeconds: Double,
+        modelID: String? = nil
+    ) {
+        self.language = language
+        self.embedding = embedding
+        self.recordedAt = recordedAt
+        self.durationSeconds = durationSeconds
+        self.modelID = modelID
+    }
 }
 
 /// 「我」的声纹档案(中/英各一份)。存 Application Support,不进 UserDefaults

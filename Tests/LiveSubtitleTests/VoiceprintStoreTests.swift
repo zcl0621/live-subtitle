@@ -98,6 +98,39 @@ final class VoiceprintStoreTests: XCTestCase {
         XCTAssertEqual(store.profiles.map(\.language), [.english])
     }
 
+    // 8. modelID 完整往返:存 → 重开实例读回,字段不丢
+    func testModelIDRoundTrips() throws {
+        let profile = VoiceprintProfile(
+            language: .chinese,
+            embedding: [1, 2, 3],
+            recordedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            durationSeconds: 8,
+            modelID: FluidAudioExtractor.modelID
+        )
+        do {
+            let store = try VoiceprintStore(directory: tempDir)
+            try store.save(profile)
+        }
+        let reopened = try VoiceprintStore(directory: tempDir)
+        XCTAssertEqual(reopened.profiles, [profile])
+        XCTAssertEqual(reopened.profiles.first?.modelID, "wespeaker_v2")
+    }
+
+    // 8b. 旧 schema JSON(无 modelID 字段)照常解码,modelID 为 nil,免迁移
+    func testOldSchemaWithoutModelIDStillDecodes() throws {
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let file = tempDir.appendingPathComponent("voiceprints.json")
+        // recordedAt 用 JSONEncoder 默认策略(秒,自参考日期起)
+        let oldJSON = """
+        [{"language":"english","embedding":[1,0,0],"recordedAt":700000000,"durationSeconds":12.5}]
+        """
+        try Data(oldJSON.utf8).write(to: file)
+        let store = try VoiceprintStore(directory: tempDir)
+        XCTAssertEqual(store.profiles.count, 1)
+        XCTAssertEqual(store.profiles.first?.language, .english)
+        XCTAssertNil(store.profiles.first?.modelID)
+    }
+
     // 7b. 合法 JSON 但 schema 不对(非数组)→ 同样降级为空档案
     func testWrongSchemaJSONDegradesToEmpty() throws {
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)

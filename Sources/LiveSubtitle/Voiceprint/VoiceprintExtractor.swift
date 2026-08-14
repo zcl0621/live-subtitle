@@ -18,8 +18,10 @@ enum PCMConvert {
 }
 
 /// FluidAudio(WeSpeaker v2)实现,走 P6a 验证过的轻量路径:
-/// 只把 wespeaker_v2.mlmodelc 载入内存(0.07s),segmentation 模型完全不载,
-/// mask 帧数从 embedding 模型自己的输入形状读取(P6a 实测两条路径余弦 1.000000)。
+/// 稳态只把 wespeaker_v2.mlmodelc 载入内存(0.07s),mask 帧数从 embedding
+/// 模型自己的输入形状读取(P6a 实测与完整路径余弦 1.000000)。
+/// 首次下载时 FluidAudio 内部会短暂载两个模型(downloadIfNeeded 的副作用),
+/// 模型已在盘上时跳过该调用,segmentation 模型完全不碰。
 ///
 /// ⚠️ P6a 实测模型原始输出并非 L2 归一化(L2≈1.037),而 SpeakerClusterer.cosine
 /// 是纯点积 —— 本实现必须归一化后再返回,否则阈值判定整体偏移。
@@ -32,7 +34,12 @@ actor FluidAudioExtractor: VoiceprintExtractor {
         case notPrepared
         case badModel
         case empty
+        case degenerateEmbedding
     }
+
+    /// 当前声纹模型标识,存进 VoiceprintProfile.modelID:换模型后旧档案
+    /// 向量空间不兼容,靠这个字段识别并提示重录(Task 8 保存档案时盖章)。
+    static let modelID = "wespeaker_v2"
 
     private var extractor: EmbeddingExtractor?
     private var maskFrames = 0
@@ -53,7 +60,13 @@ actor FluidAudioExtractor: VoiceprintExtractor {
     }
 
     private func doPrepare() async throws {
-        _ = try await DiarizerModels.downloadIfNeeded()
+        // 模型已在盘上就不走 downloadIfNeeded —— 它除了下载还会把两个模型
+        // 都载进内存,稳态启动没必要付这份加载
+        if Self.findModel(
+            named: ModelNames.Diarizer.embeddingFile,
+            under: DiarizerModels.defaultModelsDirectory()) == nil {
+            _ = try await DiarizerModels.downloadIfNeeded()
+        }
 
         guard
             let modelURL = Self.findModel(
@@ -89,10 +102,15 @@ actor FluidAudioExtractor: VoiceprintExtractor {
         guard let extractor, maskFrames > 0 else { throw ExtractError.notPrepared }
         guard !samples.isEmpty else { throw ExtractError.empty }
 
+        // 模型窗口 10s(@16kHz);超长句取前 10s,不让尾部被隐式截断方式左右
+        let audio = samples.count > 160_000 ? Array(samples.prefix(160_000)) : samples
+
         let mask = [Float](repeating: 1.0, count: maskFrames)
-        let embeddings = try extractor.getEmbeddings(audio: samples, masks: [mask])
+        let embeddings = try extractor.getEmbeddings(audio: audio, masks: [mask])
         guard let raw = embeddings.first, !raw.isEmpty else { throw ExtractError.empty }
-        guard let normalized = Self.l2Normalized(raw) else { throw ExtractError.empty }
+        guard let normalized = Self.l2Normalized(raw) else {
+            throw ExtractError.degenerateEmbedding
+        }
         return normalized
     }
 
@@ -103,8 +121,12 @@ actor FluidAudioExtractor: VoiceprintExtractor {
         return v.map { $0 / norm }
     }
 
-    /// defaultModelsDirectory 的父目录是 ModelHub 仓库根,模型可能在子目录,递归找。
+    /// 先试标准位置(defaultModelsDirectory 直下);不在再从 ModelHub 仓库根
+    /// (defaultModelsDirectory 的父目录)递归找 —— 模型可能在子目录里。
     private static func findModel(named: String, under root: URL) -> URL? {
+        let direct = root.appendingPathComponent(named)
+        if FileManager.default.fileExists(atPath: direct.path) { return direct }
+
         let searchRoot = root.deletingLastPathComponent()
         guard
             let enumerator = FileManager.default.enumerator(
