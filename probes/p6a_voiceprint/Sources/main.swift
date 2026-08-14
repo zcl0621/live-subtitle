@@ -291,19 +291,65 @@ func cmdMatrix(_ dirPath: String) async throws {
     }
 }
 
+/// 找语音起点:100ms 帧 RMS 首次超过全段峰值 RMS 的 15% 处。
+/// 不修剪的话,短前缀切到的是按录音键后的静音/呼吸,测出来是「空白的衰减」而非「短语音的衰减」。
+func speechStart(_ audio: [Float]) -> Int {
+    let frame = 1600  // 100ms @16k
+    var rms: [Float] = []
+    var i = 0
+    while i + frame <= audio.count {
+        var s: Float = 0
+        for j in i..<(i + frame) { s += audio[j] * audio[j] }
+        rms.append(sqrt(s / Float(frame)))
+        i += frame
+    }
+    guard let peak = rms.max(), peak > 0 else { return 0 }
+    let gate = peak * 0.15
+    for (k, v) in rms.enumerated() where v >= gate {
+        return k * frame
+    }
+    return 0
+}
+
 func cmdDecay(_ path: String) async throws {
     let (manager, _) = try await makeManagerExtractor()
     let audio = try loadAudio(URL(fileURLWithPath: path))
     let total = Double(audio.count) / 16000
-    guard total >= 6 else { throw ProbeError("样本至少要 6s(现在 \(String(format: "%.1f", total))s)") }
-    let full = try manager.extractSpeakerEmbedding(from: audio)
-    print(String(format: "整段 %.1fs 为基准,前缀余弦:", total))
+    guard total >= 8 else { throw ProbeError("样本至少要 8s(现在 \(String(format: "%.1f", total))s)") }
+
+    let start = speechStart(audio)
+    let voiced = Array(audio[start...])
+    print(String(format: "语音起点:%.2fs(之前是静音/底噪,已剪)", Double(start) / 16000))
+
+    let full = try manager.extractSpeakerEmbedding(from: voiced)
+    print(String(format: "修剪后整段 %.1fs 为基准,前缀余弦:", Double(voiced.count) / 16000))
     for secs in [0.5, 1.0, 2.0, 3.0, 5.0] {
         let n = Int(secs * 16000)
-        let e = try manager.extractSpeakerEmbedding(from: Array(audio[0..<n]))
+        guard n <= voiced.count else { break }
+        let e = try manager.extractSpeakerEmbedding(from: Array(voiced[0..<n]))
         print(String(format: "  %.1fs → %.3f", secs, cosine(e, full)))
     }
     print("(spec §2 的短句兜底 1.0s 阈值按这条曲线校正)")
+}
+
+func cmdTrim(_ inPath: String, _ outPath: String, start: Double, dur: Double) throws {
+    let audio = try loadAudio(URL(fileURLWithPath: inPath))
+    let s = Int(start * 16000), n = Int(dur * 16000)
+    guard s + n <= audio.count else {
+        throw ProbeError(String(
+            format: "区间越界:文件只有 %.1fs,要 %.1fs+%.1fs", Double(audio.count) / 16000, start, dur))
+    }
+    let seg = Array(audio[s..<(s + n)])
+    let fmt = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
+    let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(n))!
+    buf.frameLength = AVAudioFrameCount(n)
+    seg.withUnsafeBufferPointer { buf.floatChannelData![0].update(from: $0.baseAddress!, count: n) }
+    let out = try AVAudioFile(
+        forWriting: URL(fileURLWithPath: outPath),
+        settings: fmt.settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+    try out.write(from: buf)
+    print(String(format: "已写 %@(%.1fs @16k mono)", outPath, dur))
 }
 
 // MARK: - 目录大小小工具
@@ -342,6 +388,8 @@ do {
     case "embed" where args.count >= 3: try await cmdEmbed(args[2])
     case "matrix" where args.count >= 3: try await cmdMatrix(args[2])
     case "decay" where args.count >= 3: try await cmdDecay(args[2])
+    case "trim" where args.count >= 6:
+        try cmdTrim(args[2], args[3], start: Double(args[4]) ?? 0, dur: Double(args[5]) ?? 30)
     default: usage()
     }
 } catch {

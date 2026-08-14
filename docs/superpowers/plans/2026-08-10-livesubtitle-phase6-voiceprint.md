@@ -13,9 +13,12 @@
 > (既有 31 + 新增 24)。commit:Task 1 `d77ac76`;Task 2 `2f45f5c`+`9daa237`;
 > Task 3 `c014820`+`b4aed41`;Task 4 `5778223`+`5bcef20`。
 > 下一步是 Task 0 探针(需人工录声纹样本),探针结论出来前**不要动 Task 5–10**。
-> **P6a Step 1 已跑通(2026-08-14):**探针包在 `probes/p6a_voiceprint/`,装包/下载/推理闭环 ✅,
-> 可只载 embedding 模型 ✅(Task 5 代码已按 0.15.5 真实 API 改写,见 Task 5 Step 3),
-> **embedding 要自己 L2 归一化** ⚠️。Step 2/3/4(区分度/阈值/衰减)等人工录音,工具已备好。
+> **P6a 全部完成(2026-08-14):🟢 GO,WeSpeaker 够用,CAM++ 对冲不启用。**
+> Step 1:闭环 ✅,可只载 embedding 模型 ✅(Task 5 代码已按 0.15.5 真实 API 改写),
+> **embedding 要自己 L2 归一化** ⚠️。
+> Step 2/3:zh 间隔 +0.368、en 间隔 +0.405,**θ_me=0.70、θ_cluster=0.60**(spec §2 已更新)。
+> Step 4:**短句兜底 1.0s → 2.0s**(`SpeakerAttributor.minDuration = 2.0`)。
+> 详见 probes/RESULTS.md P6a 章节。**剩 P6b(负载)与 P7(zh-CN)待跑,P7 不阻塞声纹侧 Task 5/6/8。**
 > 终审留给 Task 5/6 的两条提醒:
 > ① `SubtitleLine.speaker` 目前是 `let`,Task 6 的 `attachSpeaker` 需要改成 `var`(一词改动);
 > ② `VoiceprintProfile` 未记录 embedding 维度/模型标识 —— Task 5 落地时应补上,

@@ -91,15 +91,19 @@ FluidAudio 的 embedding 模型是 **WeSpeaker ResNet34-LM(256 维,VoxCeleb 训�
   → 转 Float32(/32768)
   → extractEmbedding() → 256 维
   → 与「我」的两份档案比 cosine,取 max
-      ≥ θ_me(默认 0.75) → 判定为「我」
+      ≥ θ_me(默认 0.70,P6a 实测定值) → 判定为「我」
   → 否则与本会话已有聚类中心比 cosine
-      ≥ θ_cluster(默认 0.70) → 归入该簇,更新簇中心(滑动平均后重新 L2 归一化)
+      ≥ θ_cluster(默认 0.60,P6a 实测定值) → 归入该簇,更新簇中心(滑动平均后重新 L2 归一化)
       否则 → 新建簇「说话人 N」
 ```
 
+> **θ 定值依据(P6a,2026-08-14,详见 probes/RESULTS.md):** 同人余弦 min 0.72(zh)/0.64(en),
+> 异人 max 0.35(zh)/0.24(en),两簇不重叠。0.70/0.60 在其间留双向余量。
+> caveat:异人样本为有声书录音,信道差异可能人为拉大距离,故取保守高位,Task 10 真机再校。
+
 **阈值不对称是有意的:** θ_me > θ_cluster。把别人误判成「我」比漏判「我」更糟 —— 会污染 Obsidian 导出的会议记录归属。两个阈值都放设置页可调。
 
-**短句兜底:** 时长 < 1.0s 的终句 embedding 不可靠,**沿用该轨上一句的身份**(连续性启发式),不新建簇。
+**短句兜底:** 时长 < **2.0s**(P6a 实测由 1.0s 上调:1s 前缀余弦仅 0.61–0.74,已落进阈值危险区;2s 起 0.83+)的终句 embedding 不可靠,**沿用该轨上一句的身份**(连续性启发式),不新建簇。
 
 **系统音轨的先验:** 系统音理论上不含「我」的声音(`excludesCurrentProcessAudio` 已开,且通话 app 通常不回放本人语音)。但不做硬性排除,交给余弦判断 —— 留作实测后的可选优化。
 
@@ -218,7 +222,7 @@ FluidAudio 模型首次从 HuggingFace 自动下载,之后全离线。**这是�
 
 > 以下为**尚未在真机核对**的事项,实现时逐条确认。
 
-1. **FluidAudio API 签名来自其文档,未经编译验证。** `extractEmbedding` 是否需先初始化完整 `DiarizerManager`、能否只加载 embedding 模型而跳过 segmentation 模型 —— 需实机确认。若不能单独加载,算力估算要重做。
-2. **`SpeechTranscriber` 的 zh-CN 支持情况**(见 P7)。
-3. **θ_me / θ_cluster 的具体取值**由 P6a 定,当前 0.75 / 0.70 是基于 FluidAudio 文档 `clusteringThreshold` 默认 0.7 的初值。
+1. ~~FluidAudio API 签名~~ **✅ 已验(P6a Step 1,2026-08-14):可只加载 embedding 模型跳过 segmentation**(0.15.5 真实 API 见 plan Task 5);⚠️ 输出需自行 L2 归一化。
+2. **`SpeechTranscriber` 的 zh-CN 支持情况**(见 P7)—— 仍待验。
+3. ~~θ_me / θ_cluster 的具体取值~~ **✅ 已定(P6a Step 2/3):θ_me=0.70、θ_cluster=0.60**,依据与 caveat 见 §2 与 probes/RESULTS.md;Task 10 真机再校。
 4. **中文会议下 `.fastResults` 的终句滞后**是否与英文相当(P1b 只测了英文)。
