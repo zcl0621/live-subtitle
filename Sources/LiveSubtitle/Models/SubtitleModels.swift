@@ -39,7 +39,7 @@ struct AudioFrame: Sendable {
 
 struct SubtitleLine: Identifiable, Sendable {
     let id: UUID
-    let speaker: SpeakerID
+    var speaker: SpeakerID
     var original: String
     var translated: String?
     var isFinal: Bool

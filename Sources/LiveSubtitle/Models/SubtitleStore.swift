@@ -95,6 +95,12 @@ final class SubtitleStore {
         lines[i].translationProvisional = false // 定稿译文,不再是临时半句
     }
 
+    /// 声纹判定回填:终句归属出来后按 id 更新说话人(判定是异步的,行早已上屏)。
+    func attachSpeaker(id: UUID, speaker: SpeakerID) {
+        guard let i = index(of: id) else { return }
+        lines[i].speaker = speaker
+    }
+
     /// 翻译尝试失败:打标记,UI 据此回退显原文而非永久「翻译中…」或残留的半句译文。
     /// 未翻译(nil)或仅有中间态临时译文(provisional)时都视为失败并清掉临时译文。
     func markTranslationFailed(id: UUID) {

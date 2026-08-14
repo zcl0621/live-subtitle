@@ -38,6 +38,21 @@ final class SubtitleStoreTests: XCTestCase {
         XCTAssertEqual(s.lines[0].translated, "你好。")
     }
 
+    func testAttachSpeakerById() {
+        let s = SubtitleStore()
+        let id = s.commitFinal(track: .mic, text: "Hello.")
+        XCTAssertEqual(s.lines[0].speaker.kind, .unresolved)   // 判定前
+        s.attachSpeaker(id: id, speaker: SpeakerID(track: .mic, kind: .me))
+        XCTAssertEqual(s.lines[0].speaker, SpeakerID(track: .mic, kind: .me))
+    }
+
+    func testAttachSpeakerMissingIdIsNoOp() {
+        let s = SubtitleStore()
+        _ = s.commitFinal(track: .mic, text: "Hello.")
+        s.attachSpeaker(id: UUID(), speaker: SpeakerID(track: .mic, kind: .cluster(0)))
+        XCTAssertEqual(s.lines[0].speaker.kind, .unresolved)   // 未知 id 不动任何行
+    }
+
     func testTwoSpeakersHaveIndependentVolatileLines() {
         let s = SubtitleStore()
         s.upsertVolatile(track: .system, text: "A")
