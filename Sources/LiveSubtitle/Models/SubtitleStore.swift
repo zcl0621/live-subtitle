@@ -17,6 +17,8 @@ final class SubtitleStore {
     var obsidianVaultPath: String { didSet { defaults.set(obsidianVaultPath, forKey: "ls.vaultPath") } }
     /// 边说边译:对未定稿的中间态也翻译(降延迟,代价是译文会随句子生长而跳变)。
     var translateVolatile: Bool { didSet { defaults.set(translateVolatile, forKey: "ls.translateVolatile") } }
+    /// 本场会议语种。只在开始字幕那一刻被 CaptionEngine 读取(analyzer 按它构建),中途改不生效。
+    var meetingLanguage: MeetingLanguage { didSet { defaults.set(meetingLanguage.rawValue, forKey: "ls.meetingLanguage") } }
 
     /// 布局编辑态,瞬态(不持久化),启动永远 false。
     var layoutEditing: Bool = false
@@ -46,7 +48,14 @@ final class SubtitleStore {
         deepSeekAPIKey = defaults.string(forKey: "ls.deepSeekKey") ?? ""
         obsidianVaultPath = defaults.string(forKey: "ls.vaultPath") ?? ""
         translateVolatile = defaults.object(forKey: "ls.translateVolatile") as? Bool ?? true
+        meetingLanguage = MeetingLanguage(rawValue: defaults.string(forKey: "ls.meetingLanguage") ?? "") ?? .english
         layoutEditing = false
+    }
+
+    /// 实际生效的显示模式:中文会议不产译文,含译文的模式一律退化为纯原文。
+    /// 否则终句会永远卡在「翻译中…」,`.translatedOnly` 下更是整屏只有占位、看不到字幕。
+    var effectiveDisplayMode: DisplayMode {
+        meetingLanguage.needsTranslation ? displayMode : .originalOnly
     }
 
     /// 暂存中间态,不立即上屏(由节流器 flush)。

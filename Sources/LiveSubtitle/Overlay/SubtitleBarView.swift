@@ -48,7 +48,7 @@ struct SubtitleBarView: View {
             Spacer(minLength: 0)          // 把字幕气泡顶到 panel 底部,上方多余高度透明
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(store.lines.suffix(3)) { line in
-                    SubtitleLineRow(line: line, displayMode: store.displayMode, fontSize: store.fontSize)
+                    SubtitleLineRow(line: line, displayMode: store.effectiveDisplayMode, fontSize: store.fontSize)
                 }
             }
             .padding(18)

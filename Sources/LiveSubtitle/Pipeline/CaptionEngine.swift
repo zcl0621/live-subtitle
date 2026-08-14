@@ -20,12 +20,18 @@ final class CaptionEngine {
     /// 声纹模型就绪后才为终句起归属 Task;未就绪时省掉每句白付的切片 + Float 转换 + 两次 actor 跳跃。
     private var attributionReady = false
 
+    /// 本场会议语种,init 时从 store 定格。SpeechTranscriber 在此刻按它构建,
+    /// 之后再改设置也不影响本场(UI 侧运行中把 Picker 置灰,语义一致)。
+    let meetingLanguage: MeetingLanguage
+
     /// 默认双轨:对方(系统音)+ 我(麦克风)。测试可注入自定义轨。
     init(store: SubtitleStore, tracks: [(AudioSource, TranscriptionPipeline)]? = nil) {
         self.store = store
+        let language = store.meetingLanguage
+        self.meetingLanguage = language
         let built = tracks ?? [
-            (SystemAudioSource(), TranscriptionPipeline()),
-            (MicSource(), TranscriptionPipeline()),
+            (SystemAudioSource(), TranscriptionPipeline(locale: language.locale)),
+            (MicSource(), TranscriptionPipeline(locale: language.locale)),
         ]
         self.tracks = built.map { TrackBundle(source: $0.0, pipeline: $0.1, translator: TranslationService()) }
         // 「我」的声纹档案读不出(首次运行/损坏)就当没有档案:仍能聚类,只是没人判成 .me
@@ -46,13 +52,17 @@ final class CaptionEngine {
                 onError("声纹模型准备失败:\(error.localizedDescription) — 本场说话人标注不可用,字幕不受影响")
             }
         })
-        // 每轨独立翻译服务,逐一暖机;中文包未装只报一次(失败即停,不刷屏)
-        tasks.append(Task {
-            for track in tracks {
-                do { try await track.translator.warmUp() }
-                catch { onError("请在 系统设置→通用→语言与地区→翻译语言 安装 中文(简体)"); break }
-            }
-        })
+        // 每轨独立翻译服务,逐一暖机;中文包未装只报一次(失败即停,不刷屏)。
+        // 中文会议整条翻译链路都不跑 —— 连暖机都不调,不白占 Translation 会话与内存,
+        // 也不会因用户没装中文语言包而弹一条与本场无关的报错。
+        if meetingLanguage.needsTranslation {
+            tasks.append(Task {
+                for track in tracks {
+                    do { try await track.translator.warmUp() }
+                    catch { onError("请在 系统设置→通用→语言与地区→翻译语言 安装 中文(简体)"); break }
+                }
+            })
+        }
         // 每条轨:接 onError → ensureModel → start → 消费 + 喂
         for track in tracks {
             track.source.onError = { msg in Task { @MainActor in onError(msg) } }
@@ -82,7 +92,8 @@ final class CaptionEngine {
                                         store.attachSpeaker(id: id, speaker: sp)
                                     }
                                 }
-                                if store.displayMode.showsTranslated {   // 原文模式不触发翻译(省资源,对齐 PRD)
+                                // 中文会议不翻译;英文会议下原文模式也不触发(省资源,对齐 PRD)
+                                if meetingLanguage.needsTranslation, store.displayMode.showsTranslated {
                                     Task { @MainActor in
                                         if let zh = await track.translator.translate(e.text) {
                                             store.attachTranslation(id: id, zh: zh)
@@ -114,8 +125,14 @@ final class CaptionEngine {
                 store.flushVolatile()
             }
         }
-        // 边说边译:每 ~450ms 把当前中间态送翻译(受 translateVolatile + displayMode 门控;
-        // 每轨内容未变则跳过、在途则不叠;译文经 attachVolatileTranslation 守卫回填)。
+        // 中文会议压根不起边说边译的轮询 Task,不让它空转。
+        if meetingLanguage.needsTranslation { startVolatileTranslateLoop() }
+    }
+
+    /// 边说边译:每 ~450ms 把当前中间态送翻译(受 translateVolatile + displayMode 门控;
+    /// 每轨内容未变则跳过、在途则不叠;译文经 attachVolatileTranslation 守卫回填)。
+    /// 只在需要翻译的会议里启动 —— 调用方负责门控。
+    private func startVolatileTranslateLoop() {
         volatileTranslateTask = Task { @MainActor in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(450))

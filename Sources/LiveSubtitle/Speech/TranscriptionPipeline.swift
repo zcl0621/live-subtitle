@@ -13,7 +13,7 @@ struct TranscriptEvent: Sendable {
     }
 }
 
-/// 单轨英文流式识别。喂 AudioFrame,吐 TranscriptEvent(中间态/终句)。
+/// 单轨流式识别(语种由 init 的 locale 决定,构建后不可变)。喂 AudioFrame,吐 TranscriptEvent(中间态/终句)。
 actor TranscriptionPipeline {
     private let transcriber: SpeechTranscriber
     private let analyzer: SpeechAnalyzer
@@ -24,16 +24,17 @@ actor TranscriptionPipeline {
     /// 才 append —— 缓冲计数与 analyzer 时间轴严格同源,r.range 的秒数才能换算成样本序号。
     private let ringBuffer = AudioRingBuffer(capacity: 16000 * 60)
 
-    init() {
+    /// locale 决定识别语种;SpeechTranscriber 一经构建就锁死语种,所以会议中途换不了。
+    init(locale: Locale) {
         transcriber = SpeechTranscriber(
-            locale: Locale(identifier: "en-US"),
+            locale: locale,
             transcriptionOptions: [],
             reportingOptions: [.volatileResults, .fastResults],
             attributeOptions: [.audioTimeRange])
         analyzer = SpeechAnalyzer(modules: [transcriber])
     }
 
-    /// 确保 en-US 模型已安装(headless 可下)。
+    /// 确保该语种模型已安装(headless 可下;P1 验过 en-US,P7 验过 zh-CN)。
     func ensureModel() async throws {
         if let req = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
             try await req.downloadAndInstall()

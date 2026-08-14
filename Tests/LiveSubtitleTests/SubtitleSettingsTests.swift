@@ -19,6 +19,7 @@ final class SubtitleSettingsTests: XCTestCase {
         XCTAssertEqual(s.obsidianVaultPath, "")
         XCTAssertFalse(s.layoutEditing)
         XCTAssertTrue(s.translateVolatile)     // 默认开(边说边译)
+        XCTAssertEqual(s.meetingLanguage, .english)
     }
 
     func testSettingsPersistAcrossInstances() {
@@ -33,6 +34,7 @@ final class SubtitleSettingsTests: XCTestCase {
         s1.deepSeekAPIKey = "sk-test-123"
         s1.obsidianVaultPath = "/Users/me/Vault"
         s1.translateVolatile = false
+        s1.meetingLanguage = .chinese
         let s2 = SubtitleStore(defaults: suite)
         XCTAssertEqual(s2.displayMode, .translatedOnly)
         XCTAssertEqual(s2.overlayMode, .mini)
@@ -43,6 +45,53 @@ final class SubtitleSettingsTests: XCTestCase {
         XCTAssertEqual(s2.deepSeekAPIKey, "sk-test-123")
         XCTAssertEqual(s2.obsidianVaultPath, "/Users/me/Vault")
         XCTAssertFalse(s2.translateVolatile)
+        XCTAssertEqual(s2.meetingLanguage, .chinese)
+    }
+
+    // MARK: - 会议语种(Task 7)
+
+    func testMeetingLanguageNeedsTranslation() {
+        // 用户约束:一个会议只有一种语言,中文会议不翻译。
+        XCTAssertTrue(MeetingLanguage.english.needsTranslation)
+        XCTAssertFalse(MeetingLanguage.chinese.needsTranslation)
+    }
+
+    func testMeetingLanguageLocaleMapping() {
+        XCTAssertEqual(MeetingLanguage.english.locale.identifier, "en-US")
+        XCTAssertEqual(MeetingLanguage.chinese.locale.identifier, "zh-CN")
+        // 标识符须能解析成真实语言/地区(拼错会静默退化成空语言,识别器构建后才炸)
+        XCTAssertEqual(MeetingLanguage.english.locale.language.languageCode?.identifier, "en")
+        XCTAssertEqual(MeetingLanguage.chinese.locale.language.languageCode?.identifier, "zh")
+        XCTAssertEqual(MeetingLanguage.chinese.locale.region?.identifier, "CN")
+    }
+
+    func testMeetingLanguageRawValuesAreStableStorageKeys() {
+        // rawValue 落 UserDefaults,改动会让老用户的设置静默回退到 .english
+        XCTAssertEqual(MeetingLanguage.english.rawValue, "english")
+        XCTAssertEqual(MeetingLanguage.chinese.rawValue, "chinese")
+        XCTAssertEqual(MeetingLanguage.allCases.count, 2)
+    }
+
+    func testMeetingLanguageFallsBackToEnglishOnGarbageValue() {
+        let suite = freshSuite()
+        suite.set("klingon", forKey: "ls.meetingLanguage")
+        XCTAssertEqual(SubtitleStore(defaults: suite).meetingLanguage, .english)
+    }
+
+    func testEffectiveDisplayModeCollapsesForChineseMeeting() {
+        let s = SubtitleStore(defaults: freshSuite())
+        s.meetingLanguage = .chinese
+        // 中文会议无译文:任何模式都退化为纯原文,否则终句永远卡「翻译中…」
+        for mode in DisplayMode.allCases {
+            s.displayMode = mode
+            XCTAssertEqual(s.effectiveDisplayMode, .originalOnly, "\(mode) 下中文会议应退化为原文")
+        }
+        // 英文会议照旧透传
+        s.meetingLanguage = .english
+        for mode in DisplayMode.allCases {
+            s.displayMode = mode
+            XCTAssertEqual(s.effectiveDisplayMode, mode)
+        }
     }
 
     func testLayoutEditingIsTransient() {

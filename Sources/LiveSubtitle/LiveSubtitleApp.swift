@@ -22,7 +22,7 @@ struct LiveSubtitleApp: App {
         .windowResizability(.contentSize)
 
         Settings {
-            SettingsView(store: store)
+            SettingsView(store: store, isRunning: running)
         }
     }
 

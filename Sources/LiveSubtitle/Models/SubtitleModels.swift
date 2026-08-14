@@ -29,6 +29,31 @@ extension DisplayMode {
     var showsTranslated: Bool { self != .originalOnly }
 }
 
+/// 本场会议说的是哪种语言。一个会议只有一种语言(用户约束),开场选定后整场不变。
+enum MeetingLanguage: String, Sendable, CaseIterable {
+    case english
+    case chinese
+
+    /// 识别用 locale。连字符写法即 supportedLocales 条目的 bcp47 形式
+    /// (实测两者 bcp47 相等、`AssetInventory.status` 均为 supported;P7 另验过中文可 headless 下载 + 识别)。
+    var locale: Locale {
+        switch self {
+        case .english: Locale(identifier: "en-US")
+        case .chinese: Locale(identifier: "zh-CN")
+        }
+    }
+
+    /// 是否需要翻译。中文会议的原文已经是中文,译文无意义 —— 整条翻译链路都不该跑。
+    var needsTranslation: Bool { self == .english }
+
+    var displayName: String {
+        switch self {
+        case .english: "English"
+        case .chinese: "中文"
+        }
+    }
+}
+
 /// 跨 actor 的 Sendable 音频载体(不直接传 AVAudioPCMBuffer,后者非 Sendable)。
 /// pcm 为已转换到 analyzer 目标格式(16k/Int16/单声道)的样本。
 struct AudioFrame: Sendable {

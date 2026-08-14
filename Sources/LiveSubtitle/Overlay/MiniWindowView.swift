@@ -8,7 +8,7 @@ struct MiniWindowView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(store.lines) { line in
-                        SubtitleLineRow(line: line, displayMode: store.displayMode, fontSize: store.fontSize)
+                        SubtitleLineRow(line: line, displayMode: store.effectiveDisplayMode, fontSize: store.fontSize)
                             .id(line.id)
                     }
                     Color.clear.frame(height: 1).id("bottom")
