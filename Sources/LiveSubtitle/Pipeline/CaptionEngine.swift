@@ -16,7 +16,8 @@ final class CaptionEngine {
     /// 丢弃的 engine 不会被慢速首次下载的 prepare 钩住不释放;快速 stop/start 也不会
     /// 并发跑两个 downloadIfNeeded 打同一个模型目录。
     static let sharedExtractor = FluidAudioExtractor()
-    private let attributor: SpeakerAttributor
+    /// 非 private:测试据此核对设置页的阈值确实定格进了本场。
+    let attributor: SpeakerAttributor
     /// 声纹模型就绪后才为终句起归属 Task;未就绪时省掉每句白付的切片 + Float 转换 + 两次 actor 跳跃。
     private var attributionReady = false
 
@@ -43,7 +44,12 @@ final class CaptionEngine {
         // (判定规则与 nil 遗留档案的处理见 VoiceprintProfile.isCompatible)。
         let meProfiles = (try? VoiceprintStore())?
             .meEmbeddings(modelID: FluidAudioExtractor.modelID) ?? []
-        self.attributor = SpeakerAttributor(extractor: Self.sharedExtractor, meProfiles: meProfiles)
+        // 阈值与语种一样在 init 定格:clusterer 在此刻按它构建,中途改设置不影响本场
+        // (设置页运行中把滑杆置灰,语义一致)。区间与 θ_me > θ_cluster 由 store 守。
+        self.attributor = SpeakerAttributor(extractor: Self.sharedExtractor,
+                                            meProfiles: meProfiles,
+                                            thresholdMe: Float(store.thresholdMe),
+                                            thresholdCluster: Float(store.thresholdCluster))
     }
 
     func start(onError: @escaping @MainActor (String) -> Void) {

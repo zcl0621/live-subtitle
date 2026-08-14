@@ -195,15 +195,8 @@ final class VoiceprintStoreTests: XCTestCase {
         let store = try VoiceprintStore(directory: tempDir)
         try store.save(profile(.chinese, modelID: "campplus_v1", embedding: [1, 0, 0]))
         XCTAssertTrue(store.meEmbeddings(modelID: "wespeaker_v2").isEmpty)
-        XCTAssertEqual(store.staleLanguages(modelID: "wespeaker_v2"), [.chinese])
-    }
-
-    // 9g. 兼容的档案不算 stale(UI 不该对它提示重录)
-    func testStaleLanguagesExcludesCompatibleProfiles() throws {
-        let store = try VoiceprintStore(directory: tempDir)
-        try store.save(profile(.chinese, modelID: "wespeaker_v2", embedding: [1, 0, 0]))
-        try store.save(profile(.english, modelID: nil, embedding: [0, 1, 0]))
-        XCTAssertTrue(store.staleLanguages(modelID: "wespeaker_v2").isEmpty)
+        // 盘上那份还在,只是不参与聚类;UI 侧的「要重录」提示走 VoiceprintRecorder.isStale
+        XCTAssertEqual(store.profiles.count, 1)
     }
 
     // 7. 损坏 JSON 不崩溃且降级为空档案

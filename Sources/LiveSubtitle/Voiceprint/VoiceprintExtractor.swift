@@ -41,6 +41,11 @@ actor FluidAudioExtractor: VoiceprintExtractor {
     /// 向量空间不兼容,靠这个字段识别并提示重录(Task 8 保存档案时盖章)。
     static let modelID = "wespeaker_v2"
 
+    /// 模型输入窗口:10s @ 16kHz。超过这个长度 `embed` 就截断。
+    /// 这是模型的属性,故由抽取器持有;`VoiceprintEnrollment` 的切窗读的是同一个常量
+    /// (它切窗的前提正是「一窗 = 一次 embed 的全部输入」)。
+    static let windowSamples = 160_000
+
     private var extractor: EmbeddingExtractor?
     private var maskFrames = 0
     private var inflightPrepare: Task<Void, Error>?
@@ -103,7 +108,9 @@ actor FluidAudioExtractor: VoiceprintExtractor {
         guard !samples.isEmpty else { throw ExtractError.empty }
 
         // 模型窗口 10s(@16kHz);超长句取前 10s,不让尾部被隐式截断方式左右
-        let audio = samples.count > 160_000 ? Array(samples.prefix(160_000)) : samples
+        let audio = samples.count > Self.windowSamples
+            ? Array(samples.prefix(Self.windowSamples))
+            : samples
 
         let mask = [Float](repeating: 1.0, count: maskFrames)
         let embeddings = try extractor.getEmbeddings(audio: audio, masks: [mask])

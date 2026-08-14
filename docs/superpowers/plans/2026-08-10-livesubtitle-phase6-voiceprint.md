@@ -16,9 +16,15 @@
 > **P6a 全部完成(2026-08-14):🟢 GO,WeSpeaker 够用,CAM++ 对冲不启用。**
 > Step 1:闭环 ✅,可只载 embedding 模型 ✅(Task 5 代码已按 0.15.5 真实 API 改写),
 > **embedding 要自己 L2 归一化** ⚠️。
-> Step 2/3:zh 间隔 +0.368、en 间隔 +0.405,**θ_me=0.70、θ_cluster=0.60**(spec §2 已更新)。
-> Step 4:**短句兜底 1.0s → 2.0s**(`SpeakerAttributor.minDuration = 2.0`)。
+> Step 2/3:zh 间隔 +0.368、en 间隔 +0.405,θ_me=0.70、θ_cluster=0.60。
+> Step 4:短句兜底 1.0s → 2.0s。
 > 详见 probes/RESULTS.md P6a 章节。**剩 P6b(负载)与 P7(zh-CN)待跑,P7 不阻塞声纹侧 Task 5/6/8。**
+> **⚠️ P6c 复核(2026-08-15)已推翻 P6a 上面两条定值,当前值以 P6c 为准:**
+> **θ_me=0.60、θ_cluster=0.50**(P6a 是「整段 vs 整段」标的,真实链路是「多窗平均的注册档案
+> × 会话里一条几秒的终句」,同人余弦系统性偏低,0.70 会把自己判成别人);
+> **短句兜底 2.0s → 4.0s**(`SpeakerAttributor.minDuration = 4.0`;3s 档同人/异人间隔只剩 +0.075)。
+> 详见 probes/RESULTS.md §P6c。三个值的真值来源是 `SpeakerAttributor` 上的
+> `defaultThresholdMe` / `defaultThresholdCluster` / `defaultMinDuration`。
 > 终审留给 Task 5/6 的两条提醒:
 > ① `SubtitleLine.speaker` 目前是 `let`,Task 6 的 `attachSpeaker` 需要改成 `var`(一词改动);
 > ② `VoiceprintProfile` 未记录 embedding 维度/模型标识 —— Task 5 落地时应补上,

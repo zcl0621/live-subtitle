@@ -26,6 +26,23 @@ private struct StubError: Error {}
 
 final class VoiceprintEnrollmentTests: XCTestCase {
 
+    // MARK: - 窗口长度与抽取器截断长度必须是同一个数
+
+    /// 本类型的全部数学都建立在「切出来的一窗 = embed 一次吃下的全部输入」之上。
+    /// 若哪天有人把 `FluidAudioExtractor` 的截断改小(换模型)而没改这里,
+    /// 注册端会照旧喂 10s 窗、在 embed 内被二次截断 —— 不报错,但每条档案都变弱。
+    /// 故除了钉住常量相等,还从行为上验:任何输入长度切出的窗都不超过截断长度。
+    func testEnrollmentWindowNeverExceedsExtractorTruncation() {
+        XCTAssertEqual(VoiceprintEnrollment.windowSamples, FluidAudioExtractor.windowSamples)
+        for count in [1, 16_000, 80_000, 160_000, 160_001, 240_000, 400_000, 1_000_000] {
+            for w in VoiceprintEnrollment.windows(sampleCount: count) {
+                XCTAssertLessThanOrEqual(
+                    w.count, FluidAudioExtractor.windowSamples,
+                    "sampleCount=\(count) 切出了超过 embed 截断长度的窗,会被二次截断")
+            }
+        }
+    }
+
     // MARK: - 切窗
 
     func testEmptyInputHasNoWindows() {

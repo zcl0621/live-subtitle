@@ -50,6 +50,25 @@ final class CaptionEngineTests: XCTestCase {
         XCTAssertEqual(exported, "- **我**:今天开会")
     }
 
+    /// 设置页调过的阈值要真的走进本场的判定器。没有这条,滑杆就是个装饰 ——
+    /// 而它正是 spec 风险册对「簇爆炸」开出的缓解手段(Task 10 真机验收要用)。
+    func testEngineAppliesStoredThresholds() {
+        let store = SubtitleStore(defaults: freshSuite())
+        store.thresholdMe = 0.75
+        store.thresholdCluster = 0.65
+        let engine = CaptionEngine(store: store, tracks: [])
+        XCTAssertEqual(engine.attributor.thresholdMe, 0.75, accuracy: 0.0001)
+        XCTAssertEqual(engine.attributor.thresholdCluster, 0.65, accuracy: 0.0001)
+    }
+
+    /// 没人动过设置时,本场用的就是 P6c 标定值(而不是某处另抄的一份)。
+    func testEngineUsesProbeCalibratedThresholdsByDefault() {
+        let store = SubtitleStore(defaults: freshSuite())
+        let engine = CaptionEngine(store: store, tracks: [])
+        XCTAssertEqual(engine.attributor.thresholdMe, 0.60, accuracy: 0.0001)
+        XCTAssertEqual(engine.attributor.thresholdCluster, 0.50, accuracy: 0.0001)
+    }
+
     func testStoreHandlesInterleavedSpeakersViaStageFlush() {
         let store = SubtitleStore()
         store.stageVolatile(track: .system, text: "hello")

@@ -24,6 +24,72 @@ final class SubtitleSettingsTests: XCTestCase {
         XCTAssertEqual(s.sessionLanguage, .english)
     }
 
+    // MARK: - 声纹判定阈值(设置页可调)
+
+    /// 默认值必须等于 P6c 实测标定值,且与判定侧的真值来源同源 ——
+    /// 设置页不该悄悄用另一套数把 probes 标定的结论覆盖掉。
+    func testThresholdDefaultsMatchProbeCalibration() {
+        let s = SubtitleStore(defaults: freshSuite())
+        XCTAssertEqual(s.thresholdMe, 0.60, accuracy: 0.0001)
+        XCTAssertEqual(s.thresholdCluster, 0.50, accuracy: 0.0001)
+        XCTAssertEqual(s.thresholdMe, Double(SpeakerAttributor.defaultThresholdMe), accuracy: 0.0001)
+        XCTAssertEqual(s.thresholdCluster, Double(SpeakerAttributor.defaultThresholdCluster), accuracy: 0.0001)
+    }
+
+    func testThresholdsPersistAcrossInstances() {
+        let suite = freshSuite()
+        let s1 = SubtitleStore(defaults: suite)
+        s1.thresholdMe = 0.75
+        s1.thresholdCluster = 0.65
+        let s2 = SubtitleStore(defaults: suite)
+        XCTAssertEqual(s2.thresholdMe, 0.75, accuracy: 0.0001)
+        XCTAssertEqual(s2.thresholdCluster, 0.65, accuracy: 0.0001)
+    }
+
+    /// θ_me > θ_cluster 是 spec §2 的刻意不对称(把别人认成「我」比漏认更糟)。
+    /// 用户在设置页只能碰这两根滑杆,所以不变式必须在 store 这一层守死。
+    func testThresholdInvariantHoldsUnderUIEdits() {
+        let s = SubtitleStore(defaults: freshSuite())
+
+        // 1) 把 θ_cluster 顶到 θ_me 之上 → 被压回 θ_me 之下,θ_me 纹丝不动
+        s.thresholdCluster = 0.90
+        XCTAssertEqual(s.thresholdMe, 0.60, accuracy: 0.0001, "θ_me 是锚,不该被 θ_cluster 的调整带跑")
+        XCTAssertGreaterThan(s.thresholdMe, s.thresholdCluster)
+
+        // 2) 把 θ_me 压到 θ_cluster 之下 → θ_cluster 跟着降
+        s.thresholdMe = 0.60
+        s.thresholdCluster = 0.55
+        s.thresholdMe = 0.40
+        XCTAssertEqual(s.thresholdMe, 0.40, accuracy: 0.0001)
+        XCTAssertGreaterThan(s.thresholdMe, s.thresholdCluster)
+
+        // 3) 扫遍滑杆能产生的每一个组合,不变式恒成立
+        let steps = stride(from: SubtitleStore.thresholdRange.lowerBound,
+                           through: SubtitleStore.thresholdRange.upperBound,
+                           by: SubtitleStore.thresholdStep)
+        for v in steps {
+            for w in steps {
+                s.thresholdMe = v
+                s.thresholdCluster = w
+                XCTAssertGreaterThan(s.thresholdMe, s.thresholdCluster,
+                                     "θ_me=\(v) θ_cluster=\(w) 之后不变式被破坏")
+                XCTAssertTrue(SubtitleStore.thresholdRange.contains(s.thresholdMe))
+                XCTAssertTrue(SubtitleStore.thresholdRange.contains(s.thresholdCluster))
+            }
+        }
+    }
+
+    /// 落盘的值可能来自旧版本/手改的 plist:init 也要规范化,而不是原样信任。
+    func testCorruptPersistedThresholdsAreNormalizedOnLoad() {
+        let suite = freshSuite()
+        suite.set(0.10, forKey: "ls.thresholdMe")        // 低于区间下限
+        suite.set(0.95, forKey: "ls.thresholdCluster")   // 高于上限,且高于 θ_me
+        let s = SubtitleStore(defaults: suite)
+        XCTAssertTrue(SubtitleStore.thresholdRange.contains(s.thresholdMe))
+        XCTAssertTrue(SubtitleStore.thresholdRange.contains(s.thresholdCluster))
+        XCTAssertGreaterThan(s.thresholdMe, s.thresholdCluster)
+    }
+
     func testSettingsPersistAcrossInstances() {
         let suite = freshSuite()
         let s1 = SubtitleStore(defaults: suite)

@@ -89,11 +89,6 @@ final class VoiceprintStore {
         profiles.filter { $0.isCompatible(withModelID: modelID) }.map(\.embedding)
     }
 
-    /// 存在但与当前模型不兼容的档案语言 —— UI 据此提示「换了模型,这份要重录」。
-    func staleLanguages(modelID: String) -> [VoiceprintProfile.Language] {
-        profiles.filter { !$0.isCompatible(withModelID: modelID) }.map(\.language)
-    }
-
     private func load() {
         guard let data = try? Data(contentsOf: fileURL),
               let decoded = try? JSONDecoder().decode([VoiceprintProfile].self, from: data)

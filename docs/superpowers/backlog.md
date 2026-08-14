@@ -29,7 +29,7 @@
 - **设置页**:至少含 DeepSeek API key、Obsidian vault 路径。
 - 笔记内容形态待细化:frontmatter(title/date/tags/来源)+ 转录(对方/我)+ DeepSeek 总结段。导出触发时机(停止字幕后?手动按钮?)待 brainstorm。
 
-## Phase 6(新子系统)— 声纹说话人识别 🔨 Task 1–4 已落地(2026-08-11),待跑探针(Task 0)再做 Task 5–10
+## Phase 6(新子系统)— 声纹说话人识别 ✅ Task 1–9 全部落地(2026-08-15),剩 Task 10 真机验收 + P6b 负载实测
 
 **问题:** 现在 `Speaker = { me, other }` 等价于「麦克风轨 / 系统音轨」,但**两条轨都可能有多人**(会议室里同事、远端多个参会者)。
 
@@ -44,7 +44,17 @@
 - **关键架构切分:`Speaker` 按职责一分为二** —— `Track { mic, system }`(路由用,承接旧枚举在「每轨状态字典键」上的角色,值域仍是 2、逻辑不动)+ `SpeakerID`(显示用,带 me/cluster/unresolved)。中间态按轨占位、终句按声纹回填(复用 `attachTranslation` 的回填模式)。**这个切分把重构面从「8 个源文件全改」压到「只有 `SubtitleLine.speaker` 升级」。**
 - **架构对冲:** 抽 embedding 放 `VoiceprintExtractor` protocol 后面。FluidAudio 用的是 WeSpeaker ResNet34-LM(VoxCeleb 英文训练),**中文判别力是已知残留风险**,若 P6a 实测不合格,换 CAM++ 只动一个实现类。
 
-**前置 KILL 闸门(未跑):** P6a FluidAudio 中英区分度 + 阈值标定;P7 `SpeechTranscriber` zh-CN 支持与模型下载。P6b 推理负载为 DEGRADE。
+**前置 KILL 闸门(已跑完):**
+
+- **P6a** FluidAudio 中英区分度 + 阈值标定 → 🟢 **GO**(2026-08-14):WeSpeaker 够用,CAM++ 对冲不启用;embedding 需自行 L2 归一化。
+- **P7** `SpeechTranscriber` zh-CN 支持与模型下载 → 🟢 **GO**(Task 7 因此存活)。
+- **P6c** 阈值复核(2026-08-15,Task 8 评审提出)→ 推翻 P6a 的标定:真实链路是「多窗平均的注册档案 × 会话里一条几秒的终句」,同人余弦系统性偏低。**θ_me 0.70→0.60、θ_cluster 0.60→0.50、短句兜底 2.0s→4.0s**。这三个值现在也在设置页可调(默认即标定值,θ_me > θ_cluster 的不对称由代码守)。
+- **P6b** 推理负载(DEGRADE 级)→ **仍未跑**,与 Task 10 一并留到真机阶段。
+
+**落地状态(2026-08-15):**
+
+- **Task 1–9 全部完成**,`swift build && swift test` 全绿。含:Track/SpeakerID 拆分、环形缓冲、在线聚类、档案持久化、FluidAudio 抽取器、SpeakerAttributor 接线、会议语种开关、声纹录制 UI + 说话人配色/改名、Obsidian 导出按会话分段。
+- **剩余:Task 10 真机验收**(一场中文 + 一场英文会议,身份标注正确率由用户主观判定)**+ P6b 负载实测**。验收里要重点看的是「簇爆炸」(同一人被拆成多个说话人)—— 缓解手段是设置页的 θ_cluster 滑杆。
 
 **接线参考:** [Marvinngg/ambient-voice](https://github.com/Marvinngg/ambient-voice)(MIT)—— 同技术栈(Apple SpeechAnalyzer + FluidAudio),可直接抄。
 

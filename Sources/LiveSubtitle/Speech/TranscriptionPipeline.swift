@@ -89,6 +89,11 @@ actor TranscriptionPipeline {
 
     func stop() async {
         inputCont?.finish()
+        // 置 nil 而不只是 finish():stop 之后再来一帧,`feed` 的 guard 仍会放行,
+        // 于是样本进了环形缓冲、yield 却在已结束的续体上无声丢弃 —— 缓冲计数与
+        // analyzer 时间轴就此错开,而这两者同源正是声纹切片赖以成立的前提。
+        // (今天 CaptionEngine.stop 先收采集源再收 pipeline,走不到;但只值一个词。)
+        inputCont = nil
         try? await analyzer.finalizeAndFinishThroughEndOfInput()
     }
 }

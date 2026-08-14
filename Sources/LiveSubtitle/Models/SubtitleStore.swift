@@ -21,6 +21,55 @@ final class SubtitleStore {
     /// CaptionEngine 在 start 那一刻把它快照进 sessionLanguage,analyzer 也按快照构建。
     var meetingLanguage: MeetingLanguage { didSet { defaults.set(meetingLanguage.rawValue, forKey: "ls.meetingLanguage") } }
 
+    // MARK: - 声纹判定阈值(spec §2「两个阈值都放设置页可调」)
+
+    /// 可调区间与档距。区间下限 0.3 / 上限 0.9 是围着 P6c 实测分布留的活动范围
+    /// (同人最低 ~0.68、异人最高 ~0.42),不是模型的硬边界。
+    static let thresholdRange: ClosedRange<Double> = 0.3...0.9
+    static let thresholdStep: Double = 0.05
+    /// θ_me 与 θ_cluster 之间至少留一档。**这是 spec §2 的不对称约束的执行点**:
+    /// θ_me > θ_cluster —— 把别人误判成「我」比漏判「我」更糟(会污染 Obsidian 导出的归属)。
+    static let minThresholdGap: Double = 0.05
+    /// P6c 实测定值。真值在 `SpeakerAttributor` 上(判定逻辑那一侧才是源头),
+    /// 这里只是把它换成设置页用的 Double —— 不另抄一份字面量。
+    static let defaultThresholdMe = Double(SpeakerAttributor.defaultThresholdMe)
+    static let defaultThresholdCluster = Double(SpeakerAttributor.defaultThresholdCluster)
+
+    /// θ_me:与「我」的档案余弦 ≥ 此值即判定为「我」。调低 = 更容易认成「我」。
+    /// 只在【下一场】生效:SpeakerAttributor 在 CaptionEngine.init 那一刻按它构建
+    /// (UI 侧运行中把滑杆置灰,语义与语种 Picker 一致)。
+    var thresholdMe: Double {
+        didSet {
+            let n = Self.normalizedThresholds(me: thresholdMe, cluster: thresholdCluster)
+            // 在自己的 didSet 里赋值不会再次触发 didSet(Swift 语义),故不会递归
+            if n.me != thresholdMe { thresholdMe = n.me }
+            defaults.set(thresholdMe, forKey: "ls.thresholdMe")
+            // θ_me 降到 θ_cluster 头上时,把 θ_cluster 一起压下去(见 normalizedThresholds)
+            if n.cluster != thresholdCluster { thresholdCluster = n.cluster }
+        }
+    }
+
+    /// θ_cluster:与已有簇心余弦 ≥ 此值即并入该簇。调低 = 更容易把两个人并成一个;
+    /// 调高 = 簇爆炸(同一人被拆成多个「说话人 N」)。
+    var thresholdCluster: Double {
+        didSet {
+            let n = Self.normalizedThresholds(me: thresholdMe, cluster: thresholdCluster)
+            if n.cluster != thresholdCluster { thresholdCluster = n.cluster }
+            defaults.set(thresholdCluster, forKey: "ls.thresholdCluster")
+        }
+    }
+
+    /// 夹紧到合法区间,并守住 θ_me > θ_cluster。
+    ///
+    /// **θ_me 是锚,冲突时让 θ_cluster 让步**:θ_me 管的是「别把别人认成我」这件更贵的错,
+    /// 不该被一次对 θ_cluster 的调整悄悄拉高或拉低。故 θ_me 只夹到区间内
+    /// (下限再抬一档,保证 θ_cluster 总有合法落点),θ_cluster 额外夹在 θ_me 之下。
+    static func normalizedThresholds(me: Double, cluster: Double) -> (me: Double, cluster: Double) {
+        let m = min(max(me, thresholdRange.lowerBound + minThresholdGap), thresholdRange.upperBound)
+        let c = min(max(cluster, thresholdRange.lowerBound), m - minThresholdGap)
+        return (m, c)
+    }
+
     /// 布局编辑态,瞬态(不持久化),启动永远 false。
     var layoutEditing: Bool = false
 
@@ -76,6 +125,13 @@ final class SubtitleStore {
         translateVolatile = defaults.object(forKey: "ls.translateVolatile") as? Bool ?? true
         let language = MeetingLanguage(rawValue: defaults.string(forKey: "ls.meetingLanguage") ?? "") ?? .english
         meetingLanguage = language
+        // 初始化期间 didSet 不跑,故在这里显式过一遍规范化:落盘的值可能来自旧版本、
+        // 手改的 plist 或另一台机器的同步,不能假定它满足区间与 θ_me > θ_cluster。
+        let normalized = Self.normalizedThresholds(
+            me: defaults.object(forKey: "ls.thresholdMe") as? Double ?? Self.defaultThresholdMe,
+            cluster: defaults.object(forKey: "ls.thresholdCluster") as? Double ?? Self.defaultThresholdCluster)
+        thresholdMe = normalized.me
+        thresholdCluster = normalized.cluster
         sessionLanguage = language      // 未开过字幕时,"本场"就等于设置
         layoutEditing = false
         isRunning = false

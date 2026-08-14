@@ -156,6 +156,23 @@ final class SpeakerAttributorTests: XCTestCase {
         let long = await a.attribute(track: .mic, range: 0.0..<5.0,
                                      pcm: [Int16](repeating: 1000, count: 80000))
         XCTAssertEqual(long.kind, .cluster(0), "5s ≥ 默认下限,应走抽取")
+        // 三个常量本身也钉住 —— 它们是设置页默认值与文档引用的真值来源
+        XCTAssertEqual(SpeakerAttributor.defaultThresholdMe, 0.60, accuracy: 0.0001)
+        XCTAssertEqual(SpeakerAttributor.defaultThresholdCluster, 0.50, accuracy: 0.0001)
+        XCTAssertEqual(SpeakerAttributor.defaultMinDuration, 4.0, accuracy: 0.0001)
+        XCTAssertGreaterThan(SpeakerAttributor.defaultThresholdMe,
+                             SpeakerAttributor.defaultThresholdCluster,
+                             "θ_me > θ_cluster 的不对称是 spec §2 的刻意设计")
+    }
+
+    /// 传进来的阈值要能读回来 —— CaptionEngine 的接线测试靠这两个属性核对。
+    func testThresholdsAreReadableFromOutside() {
+        let a = SpeakerAttributor(extractor: MockExtractor(behavior: .failure),
+                                  meProfiles: [],
+                                  thresholdMe: 0.72,
+                                  thresholdCluster: 0.61)
+        XCTAssertEqual(a.thresholdMe, 0.72, accuracy: 0.0001)
+        XCTAssertEqual(a.thresholdCluster, 0.61, accuracy: 0.0001)
     }
 
     // MARK: - reset

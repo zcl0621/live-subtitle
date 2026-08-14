@@ -105,7 +105,7 @@ FluidAudio 的 embedding 模型是 **WeSpeaker ResNet34-LM(256 维,VoxCeleb 训�
 > 仍留 0.18 余量,且保持 θ_me > θ_cluster 的不对称。
 > caveat:异人样本为有声书录音,信道差异可能人为拉大距离;Task 10 真机多人会议复核。
 
-**阈值不对称是有意的:** θ_me > θ_cluster。把别人误判成「我」比漏判「我」更糟 —— 会污染 Obsidian 导出的会议记录归属。两个阈值都放设置页可调。
+**阈值不对称是有意的:** θ_me > θ_cluster。把别人误判成「我」比漏判「我」更糟 —— 会污染 Obsidian 导出的会议记录归属。两个阈值都放设置页可调(✅ 已实现:`SettingsView` 两根滑杆,0.3–0.9 步进 0.05,运行中置灰;不对称约束由 `SubtitleStore.normalizedThresholds` 守 —— θ_me 是锚,冲突时 θ_cluster 让步)。
 
 **短句兜底:** 时长 < **4.0s**(P6c 实测再次上调,历经 1.0s → 2.0s → 4.0s:
 拿注册档案比 3s 会话句时,同人 min 0.485 / 异人 max 0.410,间隔只剩 +0.075,判定不可靠;
@@ -230,5 +230,5 @@ FluidAudio 模型首次从 HuggingFace 自动下载,之后全离线。**这是�
 
 1. ~~FluidAudio API 签名~~ **✅ 已验(P6a Step 1,2026-08-14):可只加载 embedding 模型跳过 segmentation**(0.15.5 真实 API 见 plan Task 5);⚠️ 输出需自行 L2 归一化。
 2. **`SpeechTranscriber` 的 zh-CN 支持情况**(见 P7)—— 仍待验。
-3. ~~θ_me / θ_cluster 的具体取值~~ **✅ 已定(P6a Step 2/3):θ_me=0.70、θ_cluster=0.60**,依据与 caveat 见 §2 与 probes/RESULTS.md;Task 10 真机再校。
+3. ~~θ_me / θ_cluster 的具体取值~~ **✅ 已定(P6c,2026-08-15):θ_me=0.60、θ_cluster=0.50**(P6c 复核后下调,替代 P6a 的 0.70/0.60 —— P6a 是「整段 vs 整段」标的,真实链路是「多窗平均档案 × 几秒的终句」,同人余弦系统性偏低)。依据与 caveat 见 §2 与 probes/RESULTS.md §P6c;两个阈值已在设置页可调(默认即上述定值),Task 10 真机再校。
 4. **中文会议下 `.fastResults` 的终句滞后**是否与英文相当(P1b 只测了英文)。
