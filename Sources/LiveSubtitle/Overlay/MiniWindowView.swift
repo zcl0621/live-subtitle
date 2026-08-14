@@ -63,7 +63,7 @@ struct MiniWindowView: View {
     private func beginRename(_ speaker: SpeakerID) {
         renaming = speaker
         // 已改过就带出现有的名字直接改;没改过留空,占位符提示默认名会被顶掉
-        draftName = store.speakerNames[speaker] ?? ""
+        draftName = store.speakerNames[speaker.kind] ?? ""
         nameFieldFocused = true
     }
 

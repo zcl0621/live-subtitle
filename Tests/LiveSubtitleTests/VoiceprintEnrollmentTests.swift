@@ -282,6 +282,142 @@ final class VoiceprintRecorderStoreTests: XCTestCase {
     }
 }
 
+// MARK: - 录音状态机(ingest 零 AVFoundation,纯状态数学,可直接喂样本)
+
+@MainActor
+final class VoiceprintRecorderIngestTests: XCTestCase {
+    private var tempDir: URL!
+
+    override func setUpWithError() throws {
+        tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("IngestTests-\(UUID().uuidString)", isDirectory: true)
+    }
+
+    override func tearDownWithError() throws {
+        if let tempDir { try? FileManager.default.removeItem(at: tempDir) }
+        tempDir = nil
+    }
+
+    private func makeRecorder() throws -> VoiceprintRecorder {
+        let recorder = VoiceprintRecorder(store: try VoiceprintStore(directory: tempDir))
+        recorder.loadIfNeeded()
+        return recorder
+    }
+
+    /// 直接把录音器摆进 .recording —— 不碰麦克风,只测 ingest 之后的状态迁移。
+    private func armed(_ recorder: VoiceprintRecorder) {
+        recorder.beginForTesting(language: .chinese)
+    }
+
+    private func chunk(seconds: Double, amplitude: Int16 = 8000) -> [Int16] {
+        [Int16](repeating: amplitude, count: Int(seconds * 16000))
+    }
+
+    // 不在 .recording 时来的样本一律丢弃(preparing 的尾包、停采集后的残包)
+    func testIngestIgnoredWhenNotRecording() throws {
+        let recorder = try makeRecorder()
+        recorder.ingest(chunk(seconds: 5))
+        XCTAssertEqual(recorder.elapsed, 0)
+        XCTAssertEqual(recorder.phase, .idle)
+    }
+
+    // elapsed = 累计样本数 / 16000,跨多批累加
+    func testElapsedAccumulatesAcrossChunks() throws {
+        let recorder = try makeRecorder()
+        armed(recorder)
+        recorder.ingest(chunk(seconds: 3))
+        XCTAssertEqual(recorder.elapsed, 3, accuracy: 1e-9)
+        recorder.ingest(chunk(seconds: 4.5))
+        XCTAssertEqual(recorder.elapsed, 7.5, accuracy: 1e-9)
+    }
+
+    // 闸门跟着 elapsed 走:15s 之前存不了,之后能存
+    func testCanSaveNowFlipsAtMinimum() throws {
+        let recorder = try makeRecorder()
+        armed(recorder)
+        recorder.ingest(chunk(seconds: 14))
+        XCTAssertFalse(recorder.canSaveNow)
+        recorder.ingest(chunk(seconds: 1))
+        XCTAssertTrue(recorder.canSaveNow)
+    }
+
+    func testLevelTracksPeakAmplitude() throws {
+        let recorder = try makeRecorder()
+        armed(recorder)
+        recorder.ingest(chunk(seconds: 0.1, amplitude: 32767))
+        XCTAssertEqual(recorder.level, 1.0, accuracy: 0.001)
+        // 快起慢落:安静的一批不会把电平直接砸到 0
+        recorder.ingest(chunk(seconds: 0.1, amplitude: 0))
+        XCTAssertEqual(recorder.level, 0.8, accuracy: 0.001)
+        XCTAssertGreaterThan(recorder.level, 0)
+    }
+
+    // MARK: 120s 上限
+
+    // 录满上限:停下、进等确认态 —— **不能**自动保存
+    func testReachingLimitStopsAndAwaitsConfirmation() throws {
+        let recorder = try makeRecorder()
+        armed(recorder)
+        recorder.ingest(chunk(seconds: VoiceprintRecorder.maximumSeconds))
+        XCTAssertTrue(recorder.isAwaitingLimitConfirmation)
+        XCTAssertFalse(recorder.isRecording)
+        // 关键回归:上限防的就是「点了录制然后走开」,自动存档等于做了它要防的事
+        XCTAssertNotEqual(recorder.phase, .processing)
+        XCTAssertTrue(recorder.profiles.isEmpty, "录满上限绝不能自动写档案")
+    }
+
+    // 样本要留着,用户确认后还能存 —— 否则等确认态是个死胡同
+    func testSamplesSurviveLimitSoUserCanStillSave() throws {
+        let recorder = try makeRecorder()
+        armed(recorder)
+        recorder.ingest(chunk(seconds: VoiceprintRecorder.maximumSeconds))
+        XCTAssertGreaterThanOrEqual(recorder.elapsed, VoiceprintRecorder.maximumSeconds)
+        XCTAssertTrue(recorder.canSaveNow)
+    }
+
+    // 等确认态不算 busy:保存和重录两个出路都得能点
+    func testLimitReachedIsNotBusy() throws {
+        let recorder = try makeRecorder()
+        armed(recorder)
+        recorder.ingest(chunk(seconds: VoiceprintRecorder.maximumSeconds))
+        XCTAssertFalse(recorder.isBusy)
+    }
+
+    // 重录 = cancel:样本清空,回到 idle,什么也没存
+    func testCancelAfterLimitDiscardsSamples() throws {
+        let recorder = try makeRecorder()
+        armed(recorder)
+        recorder.ingest(chunk(seconds: VoiceprintRecorder.maximumSeconds))
+        recorder.cancel()
+        XCTAssertEqual(recorder.phase, .idle)
+        XCTAssertEqual(recorder.elapsed, 0)
+        XCTAssertTrue(recorder.profiles.isEmpty)
+    }
+
+    // 到上限后又来的残包不再累加(采集已停,phase 已不是 .recording)
+    func testIngestAfterLimitIsIgnored() throws {
+        let recorder = try makeRecorder()
+        armed(recorder)
+        recorder.ingest(chunk(seconds: VoiceprintRecorder.maximumSeconds))
+        let elapsedAtLimit = recorder.elapsed
+        recorder.ingest(chunk(seconds: 5))
+        XCTAssertEqual(recorder.elapsed, elapsedAtLimit, accuracy: 1e-9)
+    }
+
+    // 不足 15s 就停 → 拒绝保存并丢弃样本,不留半截数据
+    func testFinishBelowMinimumRejectsAndDiscards() throws {
+        let recorder = try makeRecorder()
+        armed(recorder)
+        recorder.ingest(chunk(seconds: 8))
+        recorder.finishAndSave()
+        guard case .failure = recorder.phase else {
+            return XCTFail("不足 15 秒应当拒绝,实际 \(recorder.phase)")
+        }
+        XCTAssertEqual(recorder.elapsed, 0)
+        XCTAssertTrue(recorder.profiles.isEmpty)
+    }
+}
+
 /// 朗读语料必须够长 —— 读完不到建议时长的话,提示文本本身就是在骗用户。
 final class VoiceprintPromptTests: XCTestCase {
     func testChinesePromptIsLongEnough() {

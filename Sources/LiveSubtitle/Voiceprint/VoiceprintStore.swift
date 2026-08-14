@@ -80,11 +80,11 @@ final class VoiceprintStore {
         }
     }
 
-    /// 供 SpeakerClusterer 用的 embedding 列表(两份都给,匹配时取 max)。
-    var meEmbeddings: [[Float]] { profiles.map(\.embedding) }
-
-    /// 只取与 `modelID` 兼容的档案(接线时用这个,不要用上面那个不过滤的)。
-    /// 换模型后旧档案的向量空间不同,喂进聚类会让阈值判定失去意义。
+    /// 供 SpeakerClusterer 用的 embedding 列表(中英两份都给,匹配时取 max)。
+    /// **只取与 `modelID` 兼容的档案** —— 换模型后旧档案的向量空间不同,
+    /// 喂进聚类算出来的余弦没有意义,阈值判定会整体失真。
+    ///
+    /// 没有留一个「不过滤」的重载:那种版本除了给调用方一个踩错的机会没有别的用处。
     func meEmbeddings(modelID: String) -> [[Float]] {
         profiles.filter { $0.isCompatible(withModelID: modelID) }.map(\.embedding)
     }

@@ -21,9 +21,17 @@ final class SpeakerDisplayTests: XCTestCase {
         XCTAssertEqual(SpeakerID(track: .system, kind: .cluster(4)).displayName, "说话人 5")
     }
 
-    func testDisplayNameForUnresolved() {
-        XCTAssertEqual(SpeakerID.unresolved(.mic).displayName, "…")
-        XCTAssertEqual(SpeakerID.unresolved(.system).displayName, "…")
+    // 未判定退回轨别名,不显示「…」:模型下载失败/冷启动没跟上时 attributionReady 永假,
+    // 显示「…」会把 app 确定知道的轨信息也丢掉,变成每行永久占位符。
+    func testDisplayNameForUnresolvedFallsBackToTrack() {
+        XCTAssertEqual(SpeakerID.unresolved(.mic).displayName, "我")
+        XCTAssertEqual(SpeakerID.unresolved(.system).displayName, "对方")
+    }
+
+    // 与 ObsidianExporter 对同一批行的写法保持一致,免得同一份数据出现两套说法
+    func testUnresolvedNamesMatchExporterConvention() {
+        XCTAssertEqual(SpeakerID.unresolved(.mic).displayName, "我")
+        XCTAssertEqual(SpeakerID.unresolved(.system).displayName, "对方")
     }
 
     // MARK: - 改名映射优先
@@ -47,14 +55,27 @@ final class SpeakerDisplayTests: XCTestCase {
         XCTAssertEqual(store.displayName(for: me), "我")
     }
 
-    // 同一 kind、不同 track 是两个不同的 SpeakerID,不该串名
-    func testRenameIsPerTrack() {
+    // 两条轨共用同一个 SpeakerClusterer、centroids 是单一数组,所以 .cluster(0) 无论
+    // 出现在哪条轨都是同一个 centroid = 同一个人 —— 配色已按 kind 忽略轨(同色),
+    // 改名也必须跟着走,否则用户看到两个同色同名的 chip,改一个只有一半的行更新。
+    func testRenameAppliesAcrossTracksForSameCluster() {
         let store = SubtitleStore(defaults: freshSuite())
         let micCluster = SpeakerID(track: .mic, kind: .cluster(0))
         let systemCluster = SpeakerID(track: .system, kind: .cluster(0))
+        // 前提:两者本来就同名同色
+        XCTAssertEqual(micCluster.displayName, systemCluster.displayName)
+        XCTAssertEqual(micCluster.color, systemCluster.color)
+
         store.rename(micCluster, to: "同事A")
         XCTAssertEqual(store.displayName(for: micCluster), "同事A")
-        XCTAssertEqual(store.displayName(for: systemCluster), "说话人 1")
+        XCTAssertEqual(store.displayName(for: systemCluster), "同事A")
+    }
+
+    // 「我」同理:mic 轨和 system 轨上的 .me 是同一个人
+    func testRenamingMeAppliesAcrossTracks() {
+        let store = SubtitleStore(defaults: freshSuite())
+        store.rename(SpeakerID(track: .mic, kind: .me), to: "张三")
+        XCTAssertEqual(store.displayName(for: SpeakerID(track: .system, kind: .me)), "张三")
     }
 
     // 空白名 = 恢复默认,而不是把标签抹成空白
@@ -64,7 +85,7 @@ final class SpeakerDisplayTests: XCTestCase {
         store.rename(speaker, to: "老李")
         store.rename(speaker, to: "   ")
         XCTAssertEqual(store.displayName(for: speaker), "说话人 3")
-        XCTAssertNil(store.speakerNames[speaker])
+        XCTAssertNil(store.speakerNames[speaker.kind])
     }
 
     func testRenameTrimsWhitespace() {
@@ -77,7 +98,7 @@ final class SpeakerDisplayTests: XCTestCase {
     // overrides 里存了空白字符串(不经 rename 直接塞)也要退回默认名
     func testBlankOverrideFallsBackToDefault() {
         let speaker = SpeakerID(track: .system, kind: .cluster(0))
-        XCTAssertEqual(speaker.displayName(overrides: [speaker: "  "]), "说话人 1")
+        XCTAssertEqual(speaker.displayName(overrides: [speaker.kind: "  "]), "说话人 1")
     }
 
     // MARK: - 改名是瞬态的
@@ -145,17 +166,21 @@ final class SpeakerDisplayTests: XCTestCase {
                        SpeakerID(track: .system, kind: .cluster(3)).color)
     }
 
-    func testMeAndUnresolvedUseFixedColors() {
+    // 「我」恒定蓝;未判定按轨给旧配色(蓝/橙),不用灰
+    // —— 灰底配「我」这种确定的名字会读成「这条不确定」,反倒误导。
+    func testMeAndUnresolvedColors() {
         XCTAssertEqual(SpeakerID(track: .mic, kind: .me).color, .blue)
         XCTAssertEqual(SpeakerID(track: .system, kind: .me).color, .blue)
-        XCTAssertEqual(SpeakerID.unresolved(.mic).color, .gray)
+        XCTAssertEqual(SpeakerID.unresolved(.mic).color, .blue)
+        XCTAssertEqual(SpeakerID.unresolved(.system).color, .orange)
         XCTAssertNil(SpeakerID(track: .mic, kind: .me).paletteIndex)
         XCTAssertNil(SpeakerID.unresolved(.mic).paletteIndex)
     }
 
     // MARK: - 可改名性
 
-    // 「…」是判定中的占位,不是一个人 —— 改它没意义(回填后当场作废)
+    // 未判定行虽然显示成「我/对方」,仍不可改名:它是「还没判出来」的占位身份,
+    // 判定一回填这条行就变成别的 kind,改的名当场就跟丢了。
     func testUnresolvedIsNotRenamable() {
         XCTAssertFalse(SpeakerID.unresolved(.mic).isRenamable)
         XCTAssertTrue(SpeakerID(track: .mic, kind: .me).isRenamable)

@@ -31,7 +31,7 @@ final class VoiceprintStoreTests: XCTestCase {
     func testInitWithEmptyDirectoryHasNoProfiles() throws {
         let store = try VoiceprintStore(directory: tempDir)
         XCTAssertTrue(store.profiles.isEmpty)
-        XCTAssertTrue(store.meEmbeddings.isEmpty)
+        XCTAssertTrue(store.meEmbeddings(modelID: "wespeaker_v2").isEmpty)
     }
 
     // 2. 存中文档案 → profiles 有 1 份
@@ -72,9 +72,10 @@ final class VoiceprintStoreTests: XCTestCase {
         try store.save(makeProfile(.chinese, embedding: [1, 0, 0]))
         try store.save(makeProfile(.english, embedding: [0, 1, 0]))
         XCTAssertEqual(store.profiles.count, 2)
-        XCTAssertEqual(store.meEmbeddings.count, 2)
-        XCTAssertTrue(store.meEmbeddings.contains([1, 0, 0]))
-        XCTAssertTrue(store.meEmbeddings.contains([0, 1, 0]))
+        let embeddings = store.meEmbeddings(modelID: "wespeaker_v2")
+        XCTAssertEqual(embeddings.count, 2)
+        XCTAssertTrue(embeddings.contains([1, 0, 0]))
+        XCTAssertTrue(embeddings.contains([0, 1, 0]))
     }
 
     // 6. 删除 → 对应语言消失且持久化(重开实例确认)
@@ -177,8 +178,8 @@ final class VoiceprintStoreTests: XCTestCase {
 
         let filtered = store.meEmbeddings(modelID: "wespeaker_v2")
         XCTAssertEqual(filtered, [[1, 0, 0]])
-        // 不过滤的那个属性仍然给两条 —— 两者行为不同是有意的,接线处必须用带参数的版本
-        XCTAssertEqual(store.meEmbeddings.count, 2)
+        // 盘上确实是两份,只是其中一份被挡在聚类之外(不是没存进去)
+        XCTAssertEqual(store.profiles.count, 2)
     }
 
     // 9e. nil 档案也会被 meEmbeddings(modelID:) 放行

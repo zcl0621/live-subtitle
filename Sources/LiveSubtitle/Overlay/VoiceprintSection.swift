@@ -19,6 +19,9 @@ struct VoiceprintSection: View {
             if recorder.isRecording || recorder.phase == .preparing {
                 recordingPanel
             }
+            if recorder.isAwaitingLimitConfirmation {
+                limitConfirmPanel
+            }
             if recorder.phase == .processing {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
@@ -34,6 +37,9 @@ struct VoiceprintSection: View {
         }
         // 档案库在这里才打开:recorder 的 init 是空的(见 VoiceprintRecorder 里的说明)。
         .task { recorder.loadIfNeeded() }
+        // 关掉设置窗口就停录 —— 否则音频引擎继续跑、菜单栏麦克风指示灯常亮,
+        // 用户以为早停了。丢弃未保存的样本是对的:没人在看的录音不该悄悄存成档案。
+        .onDisappear { recorder.cancel() }
     }
 
     // MARK: - 槽位
@@ -108,6 +114,27 @@ struct VoiceprintSection: View {
                     Button("取消") { recorder.cancel() }
                     Spacer()
                 }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    /// 录满上限自动停下后的确认条。样本还在,但**必须由用户点保存**
+    /// —— 上限防的就是「点了录制然后走开」,那种情况自动存下来的正是一段空房间。
+    @ViewBuilder private var limitConfirmPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if case .limitReached(let text) = recorder.phase {
+                Text(text).font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Text("\(Int(recorder.elapsed)) 秒")
+                    .font(.system(size: 13, weight: .medium)).monospacedDigit()
+                Spacer()
+                Button("保存") { recorder.finishAndSave() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!recorder.canSaveNow)
+                Button("重录") { recorder.cancel() }
             }
         }
         .padding(.vertical, 4)

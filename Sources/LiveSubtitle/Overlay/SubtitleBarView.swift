@@ -40,25 +40,32 @@ struct SubtitleLineRow: View {
         }
     }
 
-    /// 说话人标签。归属是异步回填的,标签会从「…」跳成真身份 ——
+    /// 说话人标签。归属是异步回填的,标签会从轨别名跳成真身份 ——
     /// 加一段短过渡,让它看起来是「判出来了」,而不是屏幕在抽搐。
+    ///
+    /// 始终是同一个 Button、靠 `disabled` 控制可点性,**不能**写成
+    /// `if let onTapSpeaker, isRenamable { Button } else { chip }`:
+    /// 那个 if 的分支切换恰好发生在 unresolved→真身份 的同一帧,
+    /// `_ConditionalContent` 换分支会销毁重建视图、identity 断掉,
+    /// implicit animation 没有前后值可插值,动画等于没写。
     @ViewBuilder private var speakerLabel: some View {
-        let chip = Text(speakerName)
-            .font(.system(size: 12, weight: .medium))
-            .foregroundStyle(.white)
-            .padding(.horizontal, 7).padding(.vertical, 2)
-            .background(line.speaker.color)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .animation(.easeInOut(duration: 0.15), value: line.speaker)
-            .animation(.easeInOut(duration: 0.15), value: speakerName)
-
-        if let onTapSpeaker, line.speaker.isRenamable {
-            Button { onTapSpeaker(line.speaker) } label: { chip }
-                .buttonStyle(.plain)
-                .help("点击改名")
-        } else {
-            chip
+        Button { onTapSpeaker?(line.speaker) } label: {
+            Text(speakerName)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(line.speaker.color)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .animation(.easeInOut(duration: 0.15), value: line.speaker)
+                .animation(.easeInOut(duration: 0.15), value: speakerName)
         }
+        .buttonStyle(.plain)
+        .disabled(!canRename)
+        .help(canRename ? "点击改名" : "")   // 点不动的时候别提示能点
+    }
+
+    private var canRename: Bool {
+        onTapSpeaker != nil && line.speaker.isRenamable
     }
 }
 

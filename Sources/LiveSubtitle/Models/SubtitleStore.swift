@@ -36,7 +36,13 @@ final class SubtitleStore {
     /// 说话人改名映射。**瞬态,故意不持久化**:簇号是会话内在线聚类的产物,
     /// 下一场会议的「说话人 2」和这一场的多半不是同一个人,存下来只会张冠李戴
     /// —— 宁可每场重新改一次名,也不要一个会自信地叫错人的字幕。
-    var speakerNames: [SpeakerID: String] = [:]
+    ///
+    /// 键是 `SpeakerID.Kind` 而不是整个 `SpeakerID`:两条轨共用同一个
+    /// `SpeakerClusterer`、centroids 是单一数组,所以 `.cluster(3)` 无论出现在
+    /// mic 还是 system 轨都指同一个 centroid = 同一个人。配色本来就按 kind 忽略轨
+    /// (同簇同色),改名若按 (track, kind) 分开,用户会看到两个同色同名的 chip,
+    /// 改了一个却只有一半的行跟着变。
+    var speakerNames: [SpeakerID.Kind: String] = [:]
 
     /// 每条轨的"当前未定稿灰字行"id;定稿后清除。
     /// 用 id(而非绝对下标),这样截断旧行后仍能正确定位,不会失效或错位。
@@ -83,12 +89,13 @@ final class SubtitleStore {
     }
 
     /// 改名。空白名 = 恢复默认(而不是存一个空标签把人的身份抹成空白)。
+    /// 按 kind 生效,两条轨上的同一个人一起改。
     func rename(_ speaker: SpeakerID, to name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            speakerNames[speaker] = nil
+            speakerNames[speaker.kind] = nil
         } else {
-            speakerNames[speaker] = trimmed
+            speakerNames[speaker.kind] = trimmed
         }
     }
 

@@ -78,7 +78,9 @@ enum ObsidianExporter {
 
     // MARK: - Helpers
 
-    // Task 8 会替换成真身份文案;当前按轨给出与旧 Speaker 一致的显示
+    // TODO(Task 9): 导出改用 SpeakerID.displayName + store 的改名映射。
+    // 现在按轨给名,与屏上未判定的行恰好一致(见 SpeakerDisplay 的 .unresolved 分支),
+    // 但判定出来的簇/「我」在这里仍会被压回「我/对方」—— 导出适配是 Task 9 的活。
     private static func displayName(for speaker: SpeakerID) -> String {
         switch speaker.track {
         case .mic: return "我"

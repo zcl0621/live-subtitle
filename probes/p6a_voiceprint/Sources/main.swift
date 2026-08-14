@@ -352,6 +352,106 @@ func cmdTrim(_ inPath: String, _ outPath: String, start: Double, dur: Double) th
     print(String(format: "已写 %@(%.1fs @16k mono)", outPath, dur))
 }
 
+// MARK: - P6c:注册档案(多窗平均) vs 会话短句(单窗)的阈值复核
+
+/// 复现 Task 8 `VoiceprintEnrollment` 的数学:切 10s 窗 → 逐窗 embed → 求和 → L2 归一化。
+/// 注意必须**显式切片**:FluidAudio 的 getEmbeddings 内部只用前 160_000 样本,
+/// 直接喂整段等于只测了前 10s(P6a 原始数字就是这么来的)。
+func enrollEmbedding(_ audio: [Float], _ lean: EmbeddingExtractor, _ maskFrames: Int) throws -> [Float] {
+    let w = 160_000, minTail = 80_000
+    var ranges: [Range<Int>] = []
+    if audio.count <= w {
+        ranges = [0..<audio.count]
+    } else {
+        var s = 0
+        while s < audio.count {
+            let e = min(s + w, audio.count)
+            if e - s >= minTail { ranges.append(s..<e) }
+            s = e
+        }
+    }
+    var sum: [Float] = []
+    for r in ranges {
+        let e = try leanEmbedF(lean, maskFrames: maskFrames, audio: Array(audio[r]))
+        if sum.isEmpty { sum = e } else { for i in 0..<sum.count { sum[i] += e[i] } }
+    }
+    let n = sqrt(sum.reduce(0) { $0 + $1 * $1 })
+    return sum.map { $0 / n }
+}
+
+/// 单窗向量(模拟会话中一条终句)。Float 版,同样显式切片。
+func leanEmbedF(_ ex: EmbeddingExtractor, maskFrames: Int, audio: [Float]) throws -> [Float] {
+    let mask = [Float](repeating: 1.0, count: maskFrames)
+    guard let raw = try ex.getEmbeddings(audio: audio, masks: [mask]).first else {
+        throw ProbeError("getEmbeddings 返回空")
+    }
+    let n = sqrt(raw.reduce(0) { $0 + $1 * $1 })
+    guard n > 0 else { throw ProbeError("零向量") }
+    return raw.map { $0 / n }
+}
+
+func cmdEnrollCheck(_ dirPath: String) async throws {
+    let samples = try enumerateSamples(URL(fileURLWithPath: dirPath, isDirectory: true))
+    guard samples.count >= 2 else { throw ProbeError("至少 2 个样本") }
+    let (lean, maskFrames, _) = try makeLeanExtractor()
+
+    print("== P6c:注册档案(多窗平均)vs 会话短句(单窗)==")
+    print("会话句长按 P6a 短句闸门取 3s / 5s / 10s 三档;注册向量 = 全段多窗平均\n")
+
+    // 每个样本:注册向量 + 若干会话窗(修剪静音后,从语音起点开始按档取)
+    struct Item { let s: Sample; let enroll: [Float]; var session: [Double: [[Float]]] }
+    var items: [Item] = []
+    for s in samples {
+        let raw = try loadAudio(s.url)
+        let voiced = Array(raw[speechStart(raw)...])
+        guard voiced.count >= 160_000 else {
+            print("跳过 \(s.label):修剪后不足 10s")
+            continue
+        }
+        let enroll = try enrollEmbedding(voiced, lean, maskFrames)
+        var session: [Double: [[Float]]] = [:]
+        for secs in [3.0, 5.0, 10.0] {
+            let n = Int(secs * 16000)
+            var vecs: [[Float]] = []
+            // 从语音起点起,不重叠地取最多 3 条,模拟一场会里该人的若干终句
+            var off = 0
+            while off + n <= voiced.count && vecs.count < 3 {
+                vecs.append(try leanEmbedF(lean, maskFrames: maskFrames, audio: Array(voiced[off..<(off + n)])))
+                off += n
+            }
+            session[secs] = vecs
+        }
+        items.append(Item(s: s, enroll: enroll, session: session))
+        print("  \(s.label):注册向量 ok,会话窗 3s×\(session[3.0]!.count) 5s×\(session[5.0]!.count) 10s×\(session[10.0]!.count)")
+    }
+
+    print("\n== cosine(注册档案, 会话窗)分布 ==")
+    for secs in [3.0, 5.0, 10.0] {
+        var same: [Float] = [], cross: [Float] = []
+        for a in items {
+            for b in items {
+                guard a.s.lang == b.s.lang else { continue }   // 不跨语言匹配(用户约束)
+                for v in b.session[secs] ?? [] {
+                    let c = cosine(a.enroll, v)
+                    if a.s.person == b.s.person { same.append(c) } else { cross.append(c) }
+                }
+            }
+        }
+        print("\n[会话句长 \(String(format: "%.0f", secs))s]")
+        print("  同人:\(stats(same))")
+        print("  异人:\(stats(cross))")
+        if let sMin = same.min(), let cMax = cross.max() {
+            let gap = sMin - cMax
+            print(String(format: "  间隔 = %.3f − %.3f = %+.3f  %@", sMin, cMax, gap, gap > 0 ? "✅ 可分" : "❌ 重叠"))
+            // 当前定值是否落在安全区
+            let meOK = sMin >= 0.70 && cMax < 0.70
+            let clOK = sMin >= 0.60 && cMax < 0.60
+            print("  θ_me=0.70:\(meOK ? "✅ 同人全部命中且异人全部未命中" : "⚠️ 同人min=\(String(format: "%.3f", sMin)) 异人max=\(String(format: "%.3f", cMax)) —— 需重定")")
+            print("  θ_cluster=0.60:\(clOK ? "✅" : "⚠️ 需重定")")
+        }
+    }
+}
+
 // MARK: - 目录大小小工具
 
 extension FileManager {
@@ -388,6 +488,7 @@ do {
     case "embed" where args.count >= 3: try await cmdEmbed(args[2])
     case "matrix" where args.count >= 3: try await cmdMatrix(args[2])
     case "decay" where args.count >= 3: try await cmdDecay(args[2])
+    case "enrollcheck" where args.count >= 3: try await cmdEnrollCheck(args[2])
     case "trim" where args.count >= 6:
         try cmdTrim(args[2], args[3], start: Double(args[4]) ?? 0, dur: Double(args[5]) ?? 30)
     default: usage()

@@ -7,7 +7,13 @@ import Observation
 /// 采集路径与 `MicSource` 同构(AVAudioEngine tap → 取 0 声道 → FormatConverter →
 /// 16k/单声道/Int16),**不开 VoiceProcessing** —— 理由见 MicSource 的注释。
 /// 采集回调在音频线程,通过 `AsyncStream`(其 continuation 是 Sendable)把
-/// 已转换好的 `[Int16]` 送回 MainActor 累积,全程不需要 @unchecked Sendable。
+/// 已转换好的 `[Int16]` 送回 MainActor 累积,所以本类不必标 @unchecked Sendable。
+///
+/// ⚠️ 但别把这读成「编译器证明了这条路径线程安全」:tap 闭包里仍然握着一个非 Sendable 的
+/// `FormatConverter`,并在音频线程上调它。这段能编过只是因为 SDK 里的
+/// `AVAudioNodeTapBlock` 没标 @Sendable,并发检查压根没看这里。安全性靠的是约定:
+/// 该 converter 每次录制新建、只被这一个 tap 闭包持有、除音频线程外无人碰它。
+/// 改动这块时要自己守住这条约定,编译器不会拦你。
 @MainActor
 @Observable
 final class VoiceprintRecorder {
@@ -16,6 +22,10 @@ final class VoiceprintRecorder {
         case preparing              // 正在要权限 / 起 engine
         case recording
         case processing             // 正在抽 embedding + 落盘
+        /// 录满上限自动停了,样本还在,等用户显式决定保存还是重录。
+        /// 单独一个 case 而不是复用 .failure:这不是失败(样本完全可用),
+        /// 而且 UI 必须据此把「保存」按钮亮出来 —— 否则留着的样本无从保存,是个死胡同。
+        case limitReached(String)
         case message(String)        // 成功提示
         case failure(String)        // 失败提示(可操作)
     }
@@ -48,11 +58,19 @@ final class VoiceprintRecorder {
     var isBusy: Bool {
         switch phase {
         case .preparing, .recording, .processing: true
-        case .idle, .message, .failure: false
+        // limitReached 不算 busy:用户此刻的两个出路(保存 / 重录)都要能点
+        case .idle, .limitReached, .message, .failure: false
         }
     }
 
     var isRecording: Bool { phase == .recording }
+
+    /// 录满上限停下、等用户确认存不存。
+    var isAwaitingLimitConfirmation: Bool {
+        if case .limitReached = phase { return true }
+        return false
+    }
+
     var canSaveNow: Bool { Self.canSave(seconds: elapsed) }
 
     // AVAudioEngine 懒建:`@State private var recorder = VoiceprintRecorder()` 的默认值
@@ -148,7 +166,8 @@ final class VoiceprintRecorder {
     /// 停止录制并保存。不足 `minimumSeconds` 直接拒绝(录到的样本一并丢弃,
     /// 不留一份半截数据在内存里等着被下次误用)。
     func finishAndSave() {
-        guard phase == .recording, let language else { return }
+        // limitReached 也能存:那时采集已停、样本还在,就等这一下用户确认。
+        guard phase == .recording || isAwaitingLimitConfirmation, let language else { return }
         stopCapture()
         let seconds = Double(samples.count) / Self.sampleRate
         guard Self.canSave(seconds: seconds) else {
@@ -175,6 +194,7 @@ final class VoiceprintRecorder {
         samples.removeAll(keepingCapacity: false)
         level = 0
         phase = .processing
+        let gen = generation
         Task { @MainActor in
             do {
                 // 首次会下载模型(~13MB)+ ~3s 预热;幂等,和字幕主链路共用同一个抽取器。
@@ -189,13 +209,15 @@ final class VoiceprintRecorder {
                     // 盖章:换模型后靠它认出这份档案的向量空间已不通用(见 isCompatible)
                     modelID: FluidAudioExtractor.modelID)
                 try store.save(profile)
+                // 落盘与 profiles 刷新照做 —— 用户已经点了保存,这份档案该留下。
                 profiles = store.profiles
-                phase = .message(String(format: "已保存 %@ 声纹(%.0f 秒)。下一场字幕生效。",
-                                        language.displayName, seconds))
+                setPhaseIfCurrent(gen, .message(String(
+                    format: "已保存 %@ 声纹(%.0f 秒)。下一场字幕生效。",
+                    language.displayName, seconds)))
             } catch {
-                phase = .failure("声纹提取失败:\(error.localizedDescription) — 请重试。")
+                setPhaseIfCurrent(gen, .failure("声纹提取失败:\(error.localizedDescription) — 请重试。"))
             }
-            self.language = nil
+            if gen == generation { self.language = nil }
         }
     }
 
@@ -214,6 +236,14 @@ final class VoiceprintRecorder {
         } catch {
             phase = .failure("删除失败:\(error.localizedDescription)")
         }
+    }
+
+    /// 抽 embedding 是异步的,期间设置窗口可能被关掉(onDisappear → cancel()),
+    /// 那时 phase 已被重置成 idle —— 迟到的结果不该把它顶回 message/failure,
+    /// 否则下次打开设置页会看到一条上次遗留的提示。
+    private func setPhaseIfCurrent(_ gen: Int, _ newPhase: Phase) {
+        guard gen == generation else { return }
+        phase = newPhase
     }
 
     /// 清掉提示条(用户开始下一个动作时)。
@@ -269,7 +299,21 @@ final class VoiceprintRecorder {
         continuation = nil
     }
 
-    private func ingest(_ chunk: [Int16]) {
+#if DEBUG
+    /// 测试接缝:不碰麦克风直接摆进 `.recording`,用来单测 `ingest` 之后的状态迁移
+    /// (时长累计、电平、120s 上限)。真实路径一律走 `start(language:)`。
+    func beginForTesting(language: VoiceprintProfile.Language) {
+        self.language = language
+        samples.removeAll(keepingCapacity: false)
+        elapsed = 0
+        level = 0
+        phase = .recording
+    }
+#endif
+
+    /// 累积一批采集样本并更新时长/电平。**不是 private**:这里零 AVFoundation,
+    /// 纯状态数学,放开到 internal 就能不接麦克风单测(含 120s 上限那条分支)。
+    func ingest(_ chunk: [Int16]) {
         guard phase == .recording else { return }   // preparing/已停时来的尾包一律丢弃
         samples.append(contentsOf: chunk)
         elapsed = Double(samples.count) / Self.sampleRate
@@ -277,6 +321,17 @@ final class VoiceprintRecorder {
         for s in chunk { peak = max(peak, abs(Int32(s))) }
         // 快起慢落:纯峰值会闪成频闪灯,只保留衰减包络才看得出「在收音」
         level = max(min(1.0, Double(peak) / 32768.0), level * 0.8)
-        if elapsed >= Self.maximumSeconds { finishAndSave() }
+        if elapsed >= Self.maximumSeconds { reachLimit() }
+    }
+
+    /// 录满上限:停采集,但**绝不自动保存**。
+    /// 上限本来就是防「用户点了录制然后走开」的,那种情况下录到的正是 105 秒空房间 ——
+    /// 自动存档等于亲手做了它要防的事,还会把一份垃圾档案盖到好档案上。
+    /// 样本留着,由用户显式确认(读完了→保存;走神了→重录)。
+    private func reachLimit() {
+        stopCapture()
+        level = 0
+        phase = .limitReached(
+            "已录满 \(Int(Self.maximumSeconds)) 秒并自动停止 —— 确认读完了再点保存,否则请重录。")
     }
 }
