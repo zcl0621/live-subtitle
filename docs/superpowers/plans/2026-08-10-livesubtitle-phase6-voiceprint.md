@@ -13,6 +13,9 @@
 > (既有 31 + 新增 24)。commit:Task 1 `d77ac76`;Task 2 `2f45f5c`+`9daa237`;
 > Task 3 `c014820`+`b4aed41`;Task 4 `5778223`+`5bcef20`。
 > 下一步是 Task 0 探针(需人工录声纹样本),探针结论出来前**不要动 Task 5–10**。
+> **P6a Step 1 已跑通(2026-08-14):**探针包在 `probes/p6a_voiceprint/`,装包/下载/推理闭环 ✅,
+> 可只载 embedding 模型 ✅(Task 5 代码已按 0.15.5 真实 API 改写,见 Task 5 Step 3),
+> **embedding 要自己 L2 归一化** ⚠️。Step 2/3/4(区分度/阈值/衰减)等人工录音,工具已备好。
 > 终审留给 Task 5/6 的两条提醒:
 > ① `SubtitleLine.speaker` 目前是 `let`,Task 6 的 `attachSpeaker` 需要改成 `var`(一词改动);
 > ② `VoiceprintProfile` 未记录 embedding 维度/模型标识 —— Task 5 落地时应补上,
@@ -557,32 +560,54 @@ enum PCMConvert {
 }
 ```
 
-- [ ] **Step 3: FluidAudio 实现**
+- [ ] **Step 3: FluidAudio 实现**(✅ 已按 P6a Step 1 实测的 0.15.5 真实 API 改写,2026-08-14)
 
 ```swift
+import CoreML
 import FluidAudio
 
+/// 轻量路线(P6a 已验证):只加载 wespeaker_v2.mlmodelc,segmentation 模型完全不碰。
+/// mask 帧数从 embedding 模型自己的输入形状读取(实测 589 帧/10s 窗)。
+/// 与完整 DiarizerManager.extractSpeakerEmbedding 路径的输出余弦 = 1.000000。
 actor FluidAudioExtractor: VoiceprintExtractor {
-    private var diarizer: DiarizerManager?
+    private var extractor: EmbeddingExtractor?
+    private var maskFrames: Int = 0
 
     func prepare() async throws {
-        let models = try await DiarizerModels.downloadIfNeeded()
-        let d = DiarizerManager()
-        d.initialize(models: models)
-        diarizer = d
+        // downloadIfNeeded 会把两个模型都下载到磁盘(共 ~13MB,只下一次),
+        // 但内存里只载 embedding 这一个(0.07s)。
+        _ = try await DiarizerModels.downloadIfNeeded()
+        let url = /* Application Support/FluidAudio/Models 下找 wespeaker_v2.mlmodelc,参照 probes/p6a_voiceprint */
+        let model = try MLModel(contentsOf: url, configuration: MLModelConfiguration())
+        guard let shape = model.modelDescription.inputDescriptionsByName["mask"]?
+            .multiArrayConstraint?.shape, shape.count >= 2
+        else { throw ExtractError.badModel }
+        maskFrames = shape[1].intValue
+        extractor = EmbeddingExtractor(embeddingModel: model)
     }
 
     func embed(_ samples: [Float]) async throws -> [Float] {
-        guard let d = diarizer else { throw ExtractError.notPrepared }
-        return try d.extractEmbedding(samples)
+        guard let extractor else { throw ExtractError.notPrepared }
+        let mask = [Float](repeating: 1.0, count: maskFrames)
+        guard let raw = try extractor.getEmbeddings(audio: samples, masks: [mask]).first
+        else { throw ExtractError.empty }
+        // ⚠️ P6a 实测:输出并非严格 L2 归一化(合成音 L2=1.037)。
+        // SpeakerClusterer 的 cosine 是纯点积,这里必须自己归一化。
+        let norm = sqrt(raw.reduce(0) { $0 + $1 * $1 })
+        guard norm > 0 else { throw ExtractError.empty }
+        return raw.map { $0 / norm }
     }
 
-    enum ExtractError: Error { case notPrepared }
+    enum ExtractError: Error { case notPrepared, badModel, empty }
 }
 ```
 
-> 🔴 **待 Task 0 确认:** `extractEmbedding` 是否必须先初始化完整 `DiarizerManager`(连带加载 segmentation 模型)。
-> 若是,内存与首次加载耗时都要重估;若能只加载 `wespeaker_v2.mlmodelc`,按 spec 的轻量估算走。
+> ✅ **Task 0/P6a Step 1 已确认(2026-08-14,FluidAudio 0.15.5):**
+> `extractSpeakerEmbedding` **不需要** segmentation 推理;embedding 模型可单独加载(0.07s,7.7MB),
+> 热后单次推理 49ms(3s 音频,release)。首次推理有 ~3s 模型热身,预热时喂一段哑音频把它藏掉。
+> **另:embedding 输出要自己 L2 归一化**(见上),spec「FluidAudio 输出即归一化」的说法不成立。
+> 备选签名 `DiarizerManager.extractSpeakerEmbedding(from:)`(两模型都载入但同样不跑 segmentation)
+> 可作为参考实现对拍。
 
 - [ ] **Step 4: 模型下载时机与失败降级**
 

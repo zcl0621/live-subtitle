@@ -213,3 +213,37 @@
 - **全本地方案在机制/质量/并发层站得住,无 KILL 崩。**
 
 **剩余探针(P3 内录 / P4 回声 / P5b 双轨真采集)均需带 entitlements 的 .app bundle + TCC 授权**,CLI 无法覆盖 → 绕回"构建方式"决策(见 spec §9)。
+
+## P6a [KILL] — FluidAudio 声纹 embedding(2026-08-14,Phase 6)
+
+**探针:** `probes/p6a_voiceprint/`(独立 SwiftPM 包,FluidAudio 依赖只进这里,主 Package.swift 未动)
+**解析版本:** FluidAudio **0.15.5**(plan 写的 0.12.4 是下限;API 已按 0.15.5 真实源码核对)
+
+### Step 1 装包闭环 —— ✅ 通过(2026-08-14 实测)
+
+- 模型自动下载至 `~/Library/Application Support/FluidAudio/Models`:
+  `pyannote_segmentation.mlmodelc` 5.5 MB + `wespeaker_v2.mlmodelc` 7.7 MB。
+  首次 download+编译 19.2s;后续 wespeaker 单独加载 **0.07s**。
+- **spec 未决 1 已答:✅ 可以只加载 embedding 模型、完全跳过 segmentation。**
+  真实 API 与 plan 的推测不同:0.15.5 已有现成的
+  `DiarizerManager.extractSpeakerEmbedding(from:) -> [Float]`(单说话人整段音频,
+  内部全 1 mask,**不跑 segmentation 推理**,只读其输出形状拿 mask 帧数)。
+  更轻的路线:`EmbeddingExtractor(embeddingModel:)` 直接用单个 MLModel 构造,
+  mask 帧数可从 **embedding 模型自己的输入形状**读出(589 帧/10s 窗),
+  两条路径对同一音频的 embedding **余弦 = 1.000000**。
+  → **Task 5 按轻量路线写:只载 wespeaker_v2,内存/加载时间估算大幅好于 spec 的保守假设。**
+- 推理耗时:首次(模型热身)3.1s,**热后 49ms/次**(3s 音频,release,M 系)。
+  spec 预估 <50ms —— 热后成立;Task 5 要做**启动预热**把首次 3s 藏掉。
+- ⚠️ **发现:embedding 输出并非严格 L2 归一化**(3s 合成音实测 L2=1.037)。
+  spec/plan 写「FluidAudio 的输出即是 L2 归一化」不成立(FluidAudio 自己入库前也会再 normalize)。
+  → **Task 5 的 `VoiceprintExtractor` 实现必须自己做 L2 归一化后再交给 SpeakerClusterer**
+  (clusterer 的 cosine 是纯点积,吃未归一化向量会整体偏移阈值)。plan 已改。
+
+### Step 2/3/4 —— ⏳ 待人工样本
+
+工具已就绪(`swift run -c release p6a <matrix|decay|embed>`),等录音:
+- **me_zh_1..5、me_en_1..5**(本人中/英各 5 段,每段 ≥20s)
+- **<他人>_zh_*、<他人>_en_***(2–3 人,家人/同事/播客片段皆可)
+- 命名 `<人>_<语言>_<序号>.<wav|m4a|mp3>`,放一个目录跑 `matrix`,
+  输出全对余弦 + 同人/异人分组统计 + θ_me/θ_cluster 建议区间
+- `decay` 用任一 ≥6s 样本出 0.5/1/2/3/5s 前缀衰减曲线,校 spec §2 的 1.0s 短句阈值

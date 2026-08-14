@@ -1,7 +1,8 @@
 import Foundation
 
 /// 会话内在线说话人聚类。先比预注册的「我」,再比已有簇,都不中则新建簇。
-/// 输入 embedding 必须已 L2 归一化(FluidAudio 的输出即是)。
+/// 输入 embedding 必须已 L2 归一化(P6a 实测 FluidAudio 原始输出并非严格归一化,
+/// 由 VoiceprintExtractor 实现负责归一化后再传入 —— 见 plan Task 5)。
 /// 非线程安全;整个实例须留在单一 actor/队列内(Task 6 接线时确认)。
 final class SpeakerClusterer {
     private let meProfiles: [[Float]]
