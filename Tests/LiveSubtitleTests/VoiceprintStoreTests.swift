@@ -140,6 +140,71 @@ final class VoiceprintStoreTests: XCTestCase {
         XCTAssertTrue(store.profiles.isEmpty)
     }
 
+    // MARK: - modelID 兼容性过滤(不需要 CoreML,纯字段判定)
+
+    private func profile(_ language: VoiceprintProfile.Language,
+                         modelID: String?,
+                         embedding: [Float]) -> VoiceprintProfile {
+        VoiceprintProfile(language: language, embedding: embedding,
+                          recordedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                          durationSeconds: 22, modelID: modelID)
+    }
+
+    // 9a. 盖了当前模型的章 → 兼容
+    func testMatchingModelIDIsCompatible() {
+        let p = profile(.chinese, modelID: "wespeaker_v2", embedding: [1, 0, 0])
+        XCTAssertTrue(p.isCompatible(withModelID: "wespeaker_v2"))
+        XCTAssertTrue(p.isCompatible(withModelID: FluidAudioExtractor.modelID))
+    }
+
+    // 9b. nil(该字段出现之前落盘的老档案)→ 当作兼容,不逼老用户重录
+    func testNilModelIDIsTreatedAsLegacyCompatible() {
+        let p = profile(.chinese, modelID: nil, embedding: [1, 0, 0])
+        XCTAssertTrue(p.isCompatible(withModelID: "wespeaker_v2"))
+    }
+
+    // 9c. 明确盖了别的模型的章 → 拒绝(向量空间不通用,算出来的余弦无意义)
+    func testMismatchingModelIDIsRejected() {
+        let p = profile(.chinese, modelID: "campplus_v1", embedding: [1, 0, 0])
+        XCTAssertFalse(p.isCompatible(withModelID: "wespeaker_v2"))
+    }
+
+    // 9d. meEmbeddings(modelID:) 只放行兼容档案
+    func testMeEmbeddingsFiltersByModelID() throws {
+        let store = try VoiceprintStore(directory: tempDir)
+        try store.save(profile(.chinese, modelID: "wespeaker_v2", embedding: [1, 0, 0]))
+        try store.save(profile(.english, modelID: "campplus_v1", embedding: [0, 1, 0]))
+
+        let filtered = store.meEmbeddings(modelID: "wespeaker_v2")
+        XCTAssertEqual(filtered, [[1, 0, 0]])
+        // 不过滤的那个属性仍然给两条 —— 两者行为不同是有意的,接线处必须用带参数的版本
+        XCTAssertEqual(store.meEmbeddings.count, 2)
+    }
+
+    // 9e. nil 档案也会被 meEmbeddings(modelID:) 放行
+    func testMeEmbeddingsKeepsLegacyNilProfiles() throws {
+        let store = try VoiceprintStore(directory: tempDir)
+        try store.save(profile(.chinese, modelID: nil, embedding: [1, 0, 0]))
+        try store.save(profile(.english, modelID: "wespeaker_v2", embedding: [0, 1, 0]))
+        XCTAssertEqual(store.meEmbeddings(modelID: "wespeaker_v2").count, 2)
+    }
+
+    // 9f. 全部不兼容 → 一条都不放行(退化成「没有档案」:仍能聚类,只是没人判成 .me)
+    func testAllIncompatibleYieldsNoEmbeddings() throws {
+        let store = try VoiceprintStore(directory: tempDir)
+        try store.save(profile(.chinese, modelID: "campplus_v1", embedding: [1, 0, 0]))
+        XCTAssertTrue(store.meEmbeddings(modelID: "wespeaker_v2").isEmpty)
+        XCTAssertEqual(store.staleLanguages(modelID: "wespeaker_v2"), [.chinese])
+    }
+
+    // 9g. 兼容的档案不算 stale(UI 不该对它提示重录)
+    func testStaleLanguagesExcludesCompatibleProfiles() throws {
+        let store = try VoiceprintStore(directory: tempDir)
+        try store.save(profile(.chinese, modelID: "wespeaker_v2", embedding: [1, 0, 0]))
+        try store.save(profile(.english, modelID: nil, embedding: [0, 1, 0]))
+        XCTAssertTrue(store.staleLanguages(modelID: "wespeaker_v2").isEmpty)
+    }
+
     // 7. 损坏 JSON 不崩溃且降级为空档案
     func testCorruptFileDegradesToEmpty() throws {
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)

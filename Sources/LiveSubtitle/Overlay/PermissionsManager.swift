@@ -24,4 +24,19 @@ enum PermissionsManager {
             }
         }
     }
+
+    /// **只**要麦克风,不碰屏幕录制 —— 设置页录声纹用。
+    /// 单独一条而不是复用 `requestAll()`:那条会连带拉起屏幕录制授权,
+    /// 而录声纹跟屏幕录制毫无关系,凭空多弹一个吓人的授权框;
+    /// 且上面那条注释记的「两个 TCC 流程同时拉起」的坑正是要躲开的。
+    ///
+    /// 返回是否已授权。已被拒绝时返回 false —— 系统不会再弹框,调用方必须给出
+    /// 「去系统设置里勾」的可操作提示,而不是干等一个永远不来的授权。
+    static func requestMicrophone() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: true
+        case .notDetermined: await AVCaptureDevice.requestAccess(for: .audio)
+        default: false      // .denied / .restricted,以及将来新增的状态
+        }
+    }
 }

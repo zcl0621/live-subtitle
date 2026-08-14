@@ -24,6 +24,18 @@ struct VoiceprintProfile: Codable, Sendable, Equatable {
         self.durationSeconds = durationSeconds
         self.modelID = modelID
     }
+
+    /// 这份档案的向量还能不能喂给 `current` 这个模型的聚类。
+    ///
+    /// - 相等 → 兼容。
+    /// - `nil` → **当作兼容**。该字段是 Task 5 之后才加的,在它之前落盘的档案全部产自
+    ///   `wespeaker_v2`(当时代码里只有这一个实现),向量空间与现在相同;把它们判成不兼容
+    ///   等于凭空要求所有老用户重录一遍,收益为零。
+    /// - 不等的非 nil → **拒绝**。这是明确盖了另一个模型的章,向量空间不通用,
+    ///   拿去算余弦得到的是无意义的数字,比没有档案更糟(会误判成「我」或把人拆成两簇)。
+    func isCompatible(withModelID current: String) -> Bool {
+        modelID == nil || modelID == current
+    }
 }
 
 /// 「我」的声纹档案(中/英各一份)。存 Application Support,不进 UserDefaults
@@ -70,6 +82,17 @@ final class VoiceprintStore {
 
     /// 供 SpeakerClusterer 用的 embedding 列表(两份都给,匹配时取 max)。
     var meEmbeddings: [[Float]] { profiles.map(\.embedding) }
+
+    /// 只取与 `modelID` 兼容的档案(接线时用这个,不要用上面那个不过滤的)。
+    /// 换模型后旧档案的向量空间不同,喂进聚类会让阈值判定失去意义。
+    func meEmbeddings(modelID: String) -> [[Float]] {
+        profiles.filter { $0.isCompatible(withModelID: modelID) }.map(\.embedding)
+    }
+
+    /// 存在但与当前模型不兼容的档案语言 —— UI 据此提示「换了模型,这份要重录」。
+    func staleLanguages(modelID: String) -> [VoiceprintProfile.Language] {
+        profiles.filter { !$0.isCompatible(withModelID: modelID) }.map(\.language)
+    }
 
     private func load() {
         guard let data = try? Data(contentsOf: fileURL),

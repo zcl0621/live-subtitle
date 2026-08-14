@@ -1,6 +1,13 @@
 import AppKit
 import SwiftUI
 
+/// borderless 的 NSPanel 默认 `canBecomeKey == false`,里头的 TextField 收不到键盘
+/// —— 小窗要支持点标签改名,必须能成 key。仍带 `.nonactivatingPanel`:
+/// 点它只让这个浮窗取得键盘焦点,不把整个 app 激活到前台(不打断正在开的会)。
+private final class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
 @MainActor
 final class OverlayController {
     private var panel: NSPanel?
@@ -139,8 +146,8 @@ final class OverlayController {
         let host = NSHostingView(rootView: MiniWindowView(store: store))
         host.frame = NSRect(x: 0, y: 0, width: w, height: h)
         host.autoresizingMask = [.width, .height]     // 内容随 panel 缩放
-        let p = NSPanel(contentRect: host.frame, styleMask: [.nonactivatingPanel, .borderless, .resizable],
-                        backing: .buffered, defer: false)
+        let p = KeyablePanel(contentRect: host.frame, styleMask: [.nonactivatingPanel, .borderless, .resizable],
+                             backing: .buffered, defer: false)
         p.isFloatingPanel = true
         p.backgroundColor = .clear
         p.isOpaque = false

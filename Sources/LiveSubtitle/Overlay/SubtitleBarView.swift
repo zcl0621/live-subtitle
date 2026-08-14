@@ -1,18 +1,18 @@
 import SwiftUI
 
 /// 单行渲染,bar 与 mini 复用。读 displayMode/fontSize。
+/// 说话人名由调用方从 store 取(改名映射在 store 上),配色由 SpeakerID 自己给。
 struct SubtitleLineRow: View {
     let line: SubtitleLine
     let displayMode: DisplayMode
     let fontSize: Double
+    let speakerName: String
+    /// 非 nil 则说话人标签可点(小窗改名);字幕条是点击穿透的浮窗,传 nil。
+    var onTapSpeaker: ((SpeakerID) -> Void)?
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            // Task 8 会替换成真身份文案/配色;当前按轨给出与旧 Speaker 一致的显示
-            Text(line.speaker.track == .mic ? "我" : "对方")
-                .font(.system(size: 12, weight: .medium))
-                .padding(.horizontal, 7).padding(.vertical, 2)
-                .background(line.speaker.track == .mic ? Color.blue : Color.orange)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
+            speakerLabel
             VStack(alignment: .leading, spacing: 3) {
                 if displayMode.showsOriginal {
                     Text(line.original)
@@ -39,6 +39,27 @@ struct SubtitleLineRow: View {
             }
         }
     }
+
+    /// 说话人标签。归属是异步回填的,标签会从「…」跳成真身份 ——
+    /// 加一段短过渡,让它看起来是「判出来了」,而不是屏幕在抽搐。
+    @ViewBuilder private var speakerLabel: some View {
+        let chip = Text(speakerName)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 7).padding(.vertical, 2)
+            .background(line.speaker.color)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .animation(.easeInOut(duration: 0.15), value: line.speaker)
+            .animation(.easeInOut(duration: 0.15), value: speakerName)
+
+        if let onTapSpeaker, line.speaker.isRenamable {
+            Button { onTapSpeaker(line.speaker) } label: { chip }
+                .buttonStyle(.plain)
+                .help("点击改名")
+        } else {
+            chip
+        }
+    }
 }
 
 struct SubtitleBarView: View {
@@ -48,7 +69,9 @@ struct SubtitleBarView: View {
             Spacer(minLength: 0)          // 把字幕气泡顶到 panel 底部,上方多余高度透明
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(store.lines.suffix(3)) { line in
-                    SubtitleLineRow(line: line, displayMode: store.effectiveDisplayMode, fontSize: store.fontSize)
+                    SubtitleLineRow(line: line, displayMode: store.effectiveDisplayMode,
+                                    fontSize: store.fontSize,
+                                    speakerName: store.displayName(for: line.speaker))
                 }
             }
             .padding(18)

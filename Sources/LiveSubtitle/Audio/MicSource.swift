@@ -22,7 +22,7 @@ final class MicSource: NSObject, AudioSource, @unchecked Sendable {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buf, _ in
-            guard let self, let mono = Self.channelZeroMono(buf),
+            guard let self, let mono = FormatConverter.channelZeroMono(buf),
                   let samples = try? self.converter.convert(mono) else { return }
             self.continuation?.yield(AudioFrame(pcm: samples, track: .mic, hostTime: mach_absolute_time()))
         }
@@ -40,14 +40,4 @@ final class MicSource: NSObject, AudioSource, @unchecked Sendable {
         continuation?.finish()
     }
 
-    /// 取 0 声道为单声道 buffer(兜底任意声道数;输入节点通常是 Float32 非交织)。
-    private static func channelZeroMono(_ buf: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        guard let src = buf.floatChannelData,
-              let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                      sampleRate: buf.format.sampleRate, channels: 1, interleaved: false),
-              let out = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: buf.frameLength) else { return nil }
-        out.frameLength = buf.frameLength
-        out.floatChannelData![0].update(from: src[0], count: Int(buf.frameLength))
-        return out
-    }
 }

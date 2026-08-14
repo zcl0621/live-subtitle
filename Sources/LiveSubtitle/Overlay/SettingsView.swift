@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-/// 设置页:会议语种 + DeepSeek API Key + Obsidian vault 路径选择。
+/// 设置页:会议语种 + 我的声纹 + DeepSeek API Key + Obsidian vault 路径选择。
 @MainActor
 struct SettingsView: View {
     @Bindable var store: SubtitleStore
@@ -22,6 +22,8 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            VoiceprintSection()
 
             Section("DeepSeek") {
                 SecureField("DeepSeek API Key", text: $store.deepSeekAPIKey)

@@ -38,8 +38,10 @@ final class CaptionEngine {
         ]
         self.tracks = built.map { TrackBundle(source: $0.0, pipeline: $0.1, translator: TranslationService()) }
         // 「我」的声纹档案读不出(首次运行/损坏)就当没有档案:仍能聚类,只是没人判成 .me
-        // TODO(Task 8): 按 modelID 过滤档案(!= FluidAudioExtractor.modelID 的旧档案不该进聚类)
-        let meProfiles = (try? VoiceprintStore())?.meEmbeddings ?? []
+        // 按 modelID 过滤:盖了别的模型的章 = 向量空间不通用,宁可当没有档案
+        // (判定规则与 nil 遗留档案的处理见 VoiceprintProfile.isCompatible)。
+        let meProfiles = (try? VoiceprintStore())?
+            .meEmbeddings(modelID: FluidAudioExtractor.modelID) ?? []
         self.attributor = SpeakerAttributor(extractor: Self.sharedExtractor, meProfiles: meProfiles)
     }
 

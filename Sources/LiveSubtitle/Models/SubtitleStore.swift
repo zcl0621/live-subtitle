@@ -33,6 +33,11 @@ final class SubtitleStore {
     /// 放 store 而非 App 的 @State:设置页要据此把语种 Picker 置灰,穿参数传不进 Settings scene 才是绕路。
     var isRunning: Bool = false
 
+    /// 说话人改名映射。**瞬态,故意不持久化**:簇号是会话内在线聚类的产物,
+    /// 下一场会议的「说话人 2」和这一场的多半不是同一个人,存下来只会张冠李戴
+    /// —— 宁可每场重新改一次名,也不要一个会自信地叫错人的字幕。
+    var speakerNames: [SpeakerID: String] = [:]
+
     /// 每条轨的"当前未定稿灰字行"id;定稿后清除。
     /// 用 id(而非绝对下标),这样截断旧行后仍能正确定位,不会失效或错位。
     private var volatileIndex: [Track: UUID] = [:]
@@ -70,6 +75,21 @@ final class SubtitleStore {
     /// 读 sessionLanguage(屏上这批行的事实)而非 meetingLanguage(下一场的选择)。
     var effectiveDisplayMode: DisplayMode {
         sessionLanguage.needsTranslation ? displayMode : .originalOnly
+    }
+
+    /// 该说话人当前该显示成什么名字(改名优先,否则用默认名)。
+    func displayName(for speaker: SpeakerID) -> String {
+        speaker.displayName(overrides: speakerNames)
+    }
+
+    /// 改名。空白名 = 恢复默认(而不是存一个空标签把人的身份抹成空白)。
+    func rename(_ speaker: SpeakerID, to name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            speakerNames[speaker] = nil
+        } else {
+            speakerNames[speaker] = trimmed
+        }
     }
 
     /// 暂存中间态,不立即上屏(由节流器 flush)。
