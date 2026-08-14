@@ -635,8 +635,9 @@ struct TranscriptEvent: Sendable {
 }
 ```
 
-`attributeOptions: [.audioTimeRange]` 已开,从 `r.text` 的 attributed runs 里取。
-🔴 **具体取法待真机核对** —— `AttributedString` 上该属性的 key 与取值方式我没法在此验证。
+~~从 `r.text` 的 attributed runs 里取~~ **✅ P7 实测(2026-08-14):`SpeechTranscriber.Result.range`
+就是非可选 `CMTimeRange`,直接 `r.range` 即可**(终句 range 起点与音频静音段实测吻合,
+analyzer 时间轴与累计样本序号对齐成立)。换算:`range.start.seconds ..< range.end.seconds`。
 
 同时 `feed()` 里把样本喂进环形缓冲(与喂 analyzer 同一批,时间基准天然对齐):
 
