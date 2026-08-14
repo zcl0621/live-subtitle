@@ -288,3 +288,22 @@ spec 担心的「中文判别力偏低」未出现 —— 中文同人一致性(
 2s 起才稳定在 0.83+)。`SpeakerAttributor.minDuration = 2.0`。
 另:探针 decay 初版没剪录音起头的静音,测出过 1s→0.097 的假衰减 —— 已修
 (能量门限找语音起点),将来任何用短音频的分析都要先修剪静音。
+
+## P7 [KILL] — SpeechTranscriber zh-CN(2026-08-14,Phase 6)—— ✅ GO
+
+**探针:** `probes/p7_zh_transcribe.swift`(swiftc 单文件,沿用 P1 模式)
+
+- **[1] supportedLocales 共 45 个,含 `zh_CN` / `zh_HK` / `zh_TW` / `yue_CN`** → 中文会议路线成立,Task 7 存活
+- **[2] `AssetInventory.status(zh_CN)` = supported,无需下载**(本机中文语音资产已就绪;
+  headless 安装路径与 P1 英文同构,未触发即通过)
+- **[3] 识别抽样(me_zh_1,24.5s 朗读):** 中间态 106 条 / 终句 2 条,首终句 @0.61s(批处理)。
+  与朗读文本人工比对:主体正确,同音错字若干(城西→城市、淘到几本→他到基本、愿意→月影、
+  搬了→办了),标点断句正常,**估计字准 ~90%,对会议字幕可用**。
+  实时终句滞后(对照 P1b 英文 1.70s 中位)留待真机会议实测,不阻塞。
+- **顺带解掉 plan Task 6 的 🔴「audioTimeRange 取法」:`SpeechTranscriber.Result.range`
+  是非可选 `CMTimeRange`,直接可用,无需从 attributed runs 里挖属性。**
+  实测两条终句 range = 1.86–19.68s / 19.68–24.53s,起点与录音开头 1.9s 静音吻合
+  —— analyzer 时间轴与样本序号对齐的假设成立(环形缓冲设计成立)。
+
+**结论:P7 🟢 GO。Task 7(会议语种开关)照 plan 做;三个 KILL 闸门(P6a/P7)全部通过,
+剩 P6b 负载探针(DEGRADE)与 Task 10 真机验收合并跑。**
