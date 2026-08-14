@@ -765,11 +765,11 @@ extension SpeakerID {
 
 ## Task 9: Obsidian 导出适配 🟢
 
-**Files:** `ObsidianExporter.swift`
+**Files:** `ObsidianExporter.swift` / `ExportCoordinator.swift` / `SubtitleModels.swift` / `SubtitleStore.swift` / `CaptionEngine.swift`
 
-- [ ] `displayName(for:)` 改吃 `SpeakerID` + 改名映射,输出 `- **我 / 张三 / 说话人 2**:原文 — 译文`
-- [ ] **中文会议无译文**,导出行退化为 `- **说话人 1**:中文原文`(不留空的 ` — ` 尾巴)
-- [ ] 单测覆盖两种语种下的导出格式
+- [x] `displayName(for:)` 改吃 `SpeakerID` + 改名映射,输出 `- **我 / 张三 / 说话人 2**:原文 — 译文`
+- [x] **中文会议无译文**,导出行退化为 `- **说话人 1**:中文原文`(不留空的 ` — ` 尾巴)
+- [x] 单测覆盖两种语种下的导出格式
 
 > ⚠️ **Task 7 评审发现的陷阱(2026-08-14):`store.lines` 从来没有被清空过**
 > (全仓库无 `lines.removeAll` / 重新赋值)。同一次 app 运行里,第一场英文会议的行
@@ -777,6 +777,20 @@ extension SpeakerID {
 > 合成行做单测,测试会绿,而真机导出依旧带 ` — 译文` 尾巴。
 > **本 Task 要先决定 lines 的会话边界**:要么会话开始时清空,要么导出按会话分段
 > (后者更符合「一次会议一篇笔记」的意图)。别只改 exporter 就宣布完成。
+
+**会话边界决定(2026-08-15):取【导出按会话分段】,不在开场清空 `lines`。**
+
+- 开场清空是主按钮上的两下点(停止 → 再开始)就销毁一整场没导出的会议:中途暂停、
+  权限报错重试、误点停止都会踩到,数据损失不可逆,代价远高于省下的这点复杂度。
+- 现有代码本来就把「停止后历史仍有效」当前提:`sessionLanguage` 独立于 `meetingLanguage`
+  的注释写明「不该让屏上已有的英文行连带丢掉译文」——开场清空与该设计相悖。
+- 分段还顺手修掉不只是译文尾巴的错:`stop()` 里 `SpeakerAttributor.reset()` 会清簇,
+  两场的「说话人 2」根本不是同一个人,混在一篇笔记里 = 张冠李戴。
+
+落地:`SubtitleLine.sessionID`(store 在 `beginSession` 换章、逐行盖上)+
+`ObsidianExporter.lastSessionLines`(锚点取最后一条**终句**,新会议只有灰字时仍导出上一场);
+`beginSession` 同时清 `volatileIndex`/`pendingVolatile`(遗留灰字不被本场复用)与
+`speakerNames`(簇已重排,旧名会叫错人)。导出状态栏在有更早场次被排除时明说行数。
 
 ---
 

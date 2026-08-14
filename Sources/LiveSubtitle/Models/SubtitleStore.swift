@@ -29,6 +29,11 @@ final class SubtitleStore {
     /// 独立成一份的原因:停止后用户把设置改成中文,不该让屏上已有的英文行连带丢掉译文。
     var sessionLanguage: MeetingLanguage
 
+    /// 本场会议的标识,瞬态。每次 `beginSession`(CaptionEngine 开一场)换新,
+    /// 上屏的每一行都盖上当时的章。存在的理由:`lines` 跨会话不清空(见 beginSession),
+    /// 导出必须能把「这一场」从历史里切出来 —— 见 `ObsidianExporter.lastSessionLines`。
+    private(set) var sessionID = UUID()
+
     /// 字幕是否正在运行,瞬态(不持久化),启动永远 false。
     /// 放 store 而非 App 的 @State:设置页要据此把语种 Picker 置灰,穿参数传不进 Settings scene 才是绕路。
     var isRunning: Bool = false
@@ -83,6 +88,23 @@ final class SubtitleStore {
         sessionLanguage.needsTranslation ? displayMode : .originalOnly
     }
 
+    /// 开一场新会议(由 `CaptionEngine.init` 调用),盖新的 sessionID 并定格本场语种。
+    ///
+    /// **故意不清空 `lines`**:导出按 sessionID 分段,历史留在屏上可回看。
+    /// 若在此 removeAll,「停止 → 再开始」(中途暂停、权限重试、误点停止)就会把
+    /// 还没导出的上一场当场销毁 —— 主按钮上两下点没了一整场会议,代价远高于收益。
+    func beginSession(language: MeetingLanguage) {
+        sessionLanguage = language
+        sessionID = UUID()
+        // 上一场遗留的灰字行不再当作本场的中间态复用:否则本场第一句会去改写一条盖着
+        // 上一场章的行,定稿后既插在历史中间、又落在本场的导出分段之外。
+        volatileIndex.removeAll()
+        pendingVolatile.removeAll()
+        // 改名同样作废:停止时 `SpeakerAttributor.reset()` 已清簇,本场的「说话人 2」
+        // 与上一场多半不是同一个人。留着映射 = 自信地叫错人(理由同 speakerNames 的瞬态)。
+        speakerNames.removeAll()
+    }
+
     /// 该说话人当前该显示成什么名字(改名优先,否则用默认名)。
     func displayName(for speaker: SpeakerID) -> String {
         speaker.displayName(overrides: speakerNames)
@@ -116,7 +138,7 @@ final class SubtitleStore {
         if let id = volatileIndex[track], let i = index(of: id) {
             lines[i].original = text
         } else {
-            let line = SubtitleLine(speaker: .unresolved(track), original: text, isFinal: false)
+            let line = SubtitleLine(sessionID: sessionID, speaker: .unresolved(track), original: text, isFinal: false)
             append(line)
             volatileIndex[track] = line.id
         }
@@ -132,7 +154,7 @@ final class SubtitleStore {
             volatileIndex[track] = nil
             return id
         } else {
-            let line = SubtitleLine(speaker: .unresolved(track), original: text, isFinal: true)
+            let line = SubtitleLine(sessionID: sessionID, speaker: .unresolved(track), original: text, isFinal: true)
             append(line)
             return line.id
         }

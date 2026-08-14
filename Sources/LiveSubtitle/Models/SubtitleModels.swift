@@ -70,6 +70,10 @@ struct AudioFrame: Sendable {
 
 struct SubtitleLine: Identifiable, Sendable {
     let id: UUID
+    /// 这行产自哪一场会议 —— `SubtitleStore.beginSession` 在开场那一刻换的章。
+    /// 导出按它分段(一次会议一篇笔记),理由见 `ObsidianExporter.lastSessionLines`。
+    /// 默认给一枚独有的新 id:手搓的行各自成场,不会被误并进别人的会议。
+    let sessionID: UUID
     var speaker: SpeakerID
     var original: String
     var translated: String?
@@ -80,10 +84,10 @@ struct SubtitleLine: Identifiable, Sendable {
     /// 若终句重译失败,这份半句译文不可当作定稿译文,应回退显原文。
     var translationProvisional: Bool
 
-    init(id: UUID = UUID(), speaker: SpeakerID, original: String,
+    init(id: UUID = UUID(), sessionID: UUID = UUID(), speaker: SpeakerID, original: String,
          translated: String? = nil, isFinal: Bool = false,
          translationFailed: Bool = false, translationProvisional: Bool = false) {
-        self.id = id; self.speaker = speaker; self.original = original
+        self.id = id; self.sessionID = sessionID; self.speaker = speaker; self.original = original
         self.translated = translated; self.isFinal = isFinal
         self.translationFailed = translationFailed
         self.translationProvisional = translationProvisional

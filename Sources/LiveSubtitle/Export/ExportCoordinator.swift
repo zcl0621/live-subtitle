@@ -7,12 +7,17 @@ enum ExportCoordinator {
 
     /// 执行一次导出,返回给 UI 显示的中文状态文本。
     static func exportToObsidian(store: SubtitleStore) async -> String {
-        let finalLines = store.lines.filter { $0.isFinal }
+        // 一次会议一篇笔记:只收最后一场的行(lines 跨会话不清空,见 SubtitleStore.beginSession)
+        let finalLines = ObsidianExporter.lastSessionLines(store.lines).filter { $0.isFinal }
         guard !finalLines.isEmpty else {
             return "没有可导出的转录"
         }
+        // 被排除的是更早那些场次的行。不静默丢掉这个事实:用户按下导出时脑子里可能装着
+        // 整个 app 运行期的字幕,状态栏得说清这一篇里没有它们。
+        let skipped = store.lines.filter { $0.isFinal }.count - finalLines.count
 
-        let transcript = ObsidianExporter.transcriptMarkdown(from: finalLines)
+        let transcript = ObsidianExporter.transcriptMarkdown(from: finalLines,
+                                                             speakerNames: store.speakerNames)
         let apiKey = store.deepSeekAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let vaultPath = store.obsidianVaultPath
         let now = Date()
@@ -43,7 +48,8 @@ enum ExportCoordinator {
         )
         do {
             let url = try await Task.detached { try ObsidianExporter.write(note, toVaultPath: vaultPath) }.value
-            return "已导出: \(url.lastPathComponent)"
+            let suffix = skipped > 0 ? "(仅本场;更早 \(skipped) 行属于上一场,未收入)" : ""
+            return "已导出: \(url.lastPathComponent)\(suffix)"
         } catch let error as LocalizedError {
             return error.errorDescription ?? "导出失败"
         } catch {

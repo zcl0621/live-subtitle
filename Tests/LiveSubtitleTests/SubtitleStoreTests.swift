@@ -203,4 +203,52 @@ final class SubtitleStoreTests: XCTestCase {
         s.attachVolatileTranslation(track: .mic, sourceText: "hello", zh: "你好")
         XCTAssertEqual(s.lines.last(where: { $0.speaker.track == .mic })?.translated, "你好")
     }
+
+    // MARK: - 会话边界(beginSession)
+
+    // 每行盖当场的章;导出据此分段(见 ObsidianExporter.lastSessionLines)
+    func testLinesAreStampedWithSessionID() {
+        let s = SubtitleStore()
+        let first = s.sessionID
+        _ = s.commitFinal(track: .system, text: "第一场")
+        s.beginSession(language: .chinese)
+        XCTAssertNotEqual(s.sessionID, first)
+        _ = s.commitFinal(track: .system, text: "第二场")
+        XCTAssertEqual(s.lines[0].sessionID, first)
+        XCTAssertEqual(s.lines[1].sessionID, s.sessionID)
+    }
+
+    // 停止→重开不得销毁还没导出的上一场:主按钮上两下点掉一整场会议,代价太大
+    func testBeginSessionKeepsHistory() {
+        let s = SubtitleStore()
+        let id = s.commitFinal(track: .system, text: "hello")
+        s.attachTranslation(id: id, zh: "你好")
+        s.beginSession(language: .chinese)
+        XCTAssertEqual(s.lines.count, 1)
+        XCTAssertEqual(s.lines[0].translated, "你好")
+    }
+
+    // 上一场遗留的灰字行不得被本场复用:否则本场第一句会去改写一条盖着上一场章的行
+    func testBeginSessionDoesNotReuseStaleVolatileLine() {
+        let s = SubtitleStore()
+        s.upsertVolatile(track: .mic, text: "上一场没说完")
+        let stale = s.lines[0].id
+        s.beginSession(language: .chinese)
+        let id = s.commitFinal(track: .mic, text: "本场第一句")
+        XCTAssertNotEqual(id, stale)
+        XCTAssertEqual(s.lines.count, 2)
+        XCTAssertEqual(s.lines[1].sessionID, s.sessionID)
+        XCTAssertFalse(s.lines[0].isFinal)          // 遗留灰字仍是灰字,不会被本场定稿
+    }
+
+    // 停止时 SpeakerAttributor.reset() 已清簇:本场的「说话人 2」与上一场多半不是同一个人,
+    // 留着改名映射 = 自信地叫错人(与 speakerNames 不持久化同一条理由)
+    func testBeginSessionClearsRenames() {
+        let s = SubtitleStore()
+        let speaker = SpeakerID(track: .system, kind: .cluster(1))
+        s.rename(speaker, to: "张三")
+        s.beginSession(language: .english)
+        XCTAssertTrue(s.speakerNames.isEmpty)
+        XCTAssertEqual(s.displayName(for: speaker), "说话人 2")
+    }
 }

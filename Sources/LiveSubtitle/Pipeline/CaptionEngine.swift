@@ -29,9 +29,10 @@ final class CaptionEngine {
         self.store = store
         let language = store.meetingLanguage
         self.meetingLanguage = language
-        // 把"本场是什么语种"这个事实写回 store,视图据此决定显不显示译文栏。
-        // 否则视图读实时设置、引擎按快照跑,两份真相只靠 Picker 置灰来对齐。
-        store.sessionLanguage = language
+        // 开一场:把"本场是什么语种"这个事实写回 store(视图据此决定显不显示译文栏,
+        // 否则视图读实时设置、引擎按快照跑,两份真相只靠 Picker 置灰来对齐),
+        // 同时换一枚 sessionID —— 上屏的行盖本场的章,导出才切得出"这一场"。
+        store.beginSession(language: language)
         let built = tracks ?? [
             (SystemAudioSource(), TranscriptionPipeline(locale: language.locale)),
             (MicSource(), TranscriptionPipeline(locale: language.locale)),

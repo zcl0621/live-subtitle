@@ -29,6 +29,27 @@ final class CaptionEngineTests: XCTestCase {
         XCTAssertEqual(store.sessionLanguage, .chinese)
     }
 
+    /// 引擎开一场 = store 换一枚 sessionID。没有这条,`lines` 跨会话不清空就会让
+    /// 上一场英文会议的 ` — 译文` 尾巴混进这一场中文会议的笔记(Task 7 评审发现的陷阱)。
+    func testEngineStartsNewSessionForExportScoping() {
+        let store = SubtitleStore(defaults: freshSuite())
+        store.meetingLanguage = .english
+        _ = CaptionEngine(store: store, tracks: [])
+        let id = store.commitFinal(track: .system, text: "hello")
+        store.attachTranslation(id: id, zh: "你好")
+
+        store.meetingLanguage = .chinese
+        _ = CaptionEngine(store: store, tracks: [])       // 第二场
+        _ = store.commitFinal(track: .mic, text: "今天开会")
+
+        XCTAssertEqual(store.lines.count, 2, "上一场的行不该被销毁")
+        let exported = ObsidianExporter.transcriptMarkdown(
+            from: ObsidianExporter.lastSessionLines(store.lines),
+            speakerNames: store.speakerNames
+        )
+        XCTAssertEqual(exported, "- **我**:今天开会")
+    }
+
     func testStoreHandlesInterleavedSpeakersViaStageFlush() {
         let store = SubtitleStore()
         store.stageVolatile(track: .system, text: "hello")

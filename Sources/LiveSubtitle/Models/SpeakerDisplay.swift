@@ -8,7 +8,7 @@ extension SpeakerID {
     /// `.unresolved` 退回轨别名而不是显示「…」:轨是 app 确定知道的事实(这句从麦克风来还是
     /// 从系统音来),声纹判定只是在此之上再细分。若模型下载失败或冷启动没跟上,
     /// `attributionReady` 会一直是 false,显示「…」等于把已知信息也丢了 —— 每行永久灰点。
-    /// (ObsidianExporter 对同一批行本来就写「我/对方」,显示「…」还会让同一份数据出现两套说法。)
+    /// (ObsidianExporter 导出同一批行时直接复用本函数,显示「…」会让同一份数据出现两套说法。)
     /// 附带好处:判定落地时的过渡是 我→说话人 3,比 …→说话人 3 自然。
     var displayName: String {
         switch kind {
