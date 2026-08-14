@@ -6,7 +6,6 @@ struct LiveSubtitleApp: App {
     @State private var store = SubtitleStore()
     @State private var engine: CaptionEngine?
     @State private var overlay = OverlayController()
-    @State private var running = false
     @State private var status = ""
     @State private var exportStatus = ""
     @State private var isExporting = false
@@ -22,14 +21,14 @@ struct LiveSubtitleApp: App {
         .windowResizability(.contentSize)
 
         Settings {
-            SettingsView(store: store, isRunning: running)
+            SettingsView(store: store)
         }
     }
 
     @ViewBuilder private var controlPanel: some View {
         @Bindable var s = store
         VStack(alignment: .leading, spacing: 12) {
-            Button(running ? "停止字幕" : "开始字幕") { toggle() }
+            Button(store.isRunning ? "停止字幕" : "开始字幕") { toggle() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .frame(maxWidth: .infinity)
@@ -43,7 +42,15 @@ struct LiveSubtitleApp: App {
                 Text("原文").tag(DisplayMode.originalOnly)
                 Text("双语").tag(DisplayMode.both)
                 Text("译文").tag(DisplayMode.translatedOnly)
-            }.pickerStyle(.segmented)
+            }
+            .pickerStyle(.segmented)
+            // 中文会议不产译文,三个选项都只会显示原文 —— 死控件,置灰并说明原因。
+            .disabled(!store.sessionLanguage.needsTranslation)
+            if !store.sessionLanguage.needsTranslation {
+                Text("中文会议无译文,显示模式无从选起。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Picker("形态", selection: $s.overlayMode) {
                 Text("字幕条").tag(OverlayMode.bar)
                 Text("小窗").tag(OverlayMode.mini)
@@ -105,8 +112,8 @@ struct LiveSubtitleApp: App {
     }
 
     @MainActor private func toggle() {
-        if running {
-            engine?.stop(); engine = nil; overlay.hide(); running = false; status = ""
+        if store.isRunning {
+            engine?.stop(); engine = nil; overlay.hide(); store.isRunning = false; status = ""
         } else {
             // 权限在此刻(真正要用时)请求,不在启动时。
             // 启动阶段同时拉起麦克风 + 屏幕录制两个 TCC 流程会导致 MenuBarExtra 的状态栏项建不出来
@@ -116,7 +123,7 @@ struct LiveSubtitleApp: App {
             engine = e
             overlay.show(store: store)
             e.start(onError: { status = $0 })
-            running = true
+            store.isRunning = true
         }
     }
 }

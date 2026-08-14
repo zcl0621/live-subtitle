@@ -5,8 +5,6 @@ import AppKit
 @MainActor
 struct SettingsView: View {
     @Bindable var store: SubtitleStore
-    /// 字幕是否正在运行。运行中禁改语种:识别器在开始那一刻按语种构建,中途换不了。
-    var isRunning: Bool = false
 
     var body: some View {
         Form {
@@ -16,8 +14,9 @@ struct SettingsView: View {
                         Text(lang.displayName).tag(lang)
                     }
                 }
-                .disabled(isRunning)
-                Text(isRunning
+                // 运行中禁改:识别器在开始那一刻按语种构建,中途换不了。
+                .disabled(store.isRunning)
+                Text(store.isRunning
                      ? "字幕运行中不可切换,停止后再改。"
                      : "一个会议只有一种语言。中文会议只出原文,不做翻译。")
                     .font(.caption)

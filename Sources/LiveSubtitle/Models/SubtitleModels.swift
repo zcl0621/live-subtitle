@@ -44,7 +44,13 @@ enum MeetingLanguage: String, Sendable, CaseIterable {
     }
 
     /// 是否需要翻译。中文会议的原文已经是中文,译文无意义 —— 整条翻译链路都不该跑。
-    var needsTranslation: Bool { self == .english }
+    /// 用 switch 而非 `self == .english`:将来加语种时编译器会逼着这里表态。
+    var needsTranslation: Bool {
+        switch self {
+        case .english: true
+        case .chinese: false
+        }
+    }
 
     var displayName: String {
         switch self {

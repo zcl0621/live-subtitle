@@ -17,11 +17,21 @@ final class SubtitleStore {
     var obsidianVaultPath: String { didSet { defaults.set(obsidianVaultPath, forKey: "ls.vaultPath") } }
     /// 边说边译:对未定稿的中间态也翻译(降延迟,代价是译文会随句子生长而跳变)。
     var translateVolatile: Bool { didSet { defaults.set(translateVolatile, forKey: "ls.translateVolatile") } }
-    /// 本场会议语种。只在开始字幕那一刻被 CaptionEngine 读取(analyzer 按它构建),中途改不生效。
+    /// 会议语种设置 =【下一场】用哪种语种开字幕。改它不影响已在跑的这一场:
+    /// CaptionEngine 在 start 那一刻把它快照进 sessionLanguage,analyzer 也按快照构建。
     var meetingLanguage: MeetingLanguage { didSet { defaults.set(meetingLanguage.rawValue, forKey: "ls.meetingLanguage") } }
 
     /// 布局编辑态,瞬态(不持久化),启动永远 false。
     var layoutEditing: Bool = false
+
+    /// 当前屏上这批字幕【实际产自】哪种语种的会议 —— 由 CaptionEngine.init 写入的事实,
+    /// 不是用户的下一场选择。瞬态(不持久化),启动跟随 meetingLanguage。
+    /// 独立成一份的原因:停止后用户把设置改成中文,不该让屏上已有的英文行连带丢掉译文。
+    var sessionLanguage: MeetingLanguage
+
+    /// 字幕是否正在运行,瞬态(不持久化),启动永远 false。
+    /// 放 store 而非 App 的 @State:设置页要据此把语种 Picker 置灰,穿参数传不进 Settings scene 才是绕路。
+    var isRunning: Bool = false
 
     /// 每条轨的"当前未定稿灰字行"id;定稿后清除。
     /// 用 id(而非绝对下标),这样截断旧行后仍能正确定位,不会失效或错位。
@@ -48,14 +58,18 @@ final class SubtitleStore {
         deepSeekAPIKey = defaults.string(forKey: "ls.deepSeekKey") ?? ""
         obsidianVaultPath = defaults.string(forKey: "ls.vaultPath") ?? ""
         translateVolatile = defaults.object(forKey: "ls.translateVolatile") as? Bool ?? true
-        meetingLanguage = MeetingLanguage(rawValue: defaults.string(forKey: "ls.meetingLanguage") ?? "") ?? .english
+        let language = MeetingLanguage(rawValue: defaults.string(forKey: "ls.meetingLanguage") ?? "") ?? .english
+        meetingLanguage = language
+        sessionLanguage = language      // 未开过字幕时,"本场"就等于设置
         layoutEditing = false
+        isRunning = false
     }
 
     /// 实际生效的显示模式:中文会议不产译文,含译文的模式一律退化为纯原文。
     /// 否则终句会永远卡在「翻译中…」,`.translatedOnly` 下更是整屏只有占位、看不到字幕。
+    /// 读 sessionLanguage(屏上这批行的事实)而非 meetingLanguage(下一场的选择)。
     var effectiveDisplayMode: DisplayMode {
-        meetingLanguage.needsTranslation ? displayMode : .originalOnly
+        sessionLanguage.needsTranslation ? displayMode : .originalOnly
     }
 
     /// 暂存中间态,不立即上屏(由节流器 flush)。

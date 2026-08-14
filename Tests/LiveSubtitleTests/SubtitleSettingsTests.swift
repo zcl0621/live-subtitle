@@ -18,8 +18,10 @@ final class SubtitleSettingsTests: XCTestCase {
         XCTAssertEqual(s.deepSeekAPIKey, "")
         XCTAssertEqual(s.obsidianVaultPath, "")
         XCTAssertFalse(s.layoutEditing)
+        XCTAssertFalse(s.isRunning)
         XCTAssertTrue(s.translateVolatile)     // 默认开(边说边译)
         XCTAssertEqual(s.meetingLanguage, .english)
+        XCTAssertEqual(s.sessionLanguage, .english)
     }
 
     func testSettingsPersistAcrossInstances() {
@@ -46,6 +48,8 @@ final class SubtitleSettingsTests: XCTestCase {
         XCTAssertEqual(s2.obsidianVaultPath, "/Users/me/Vault")
         XCTAssertFalse(s2.translateVolatile)
         XCTAssertEqual(s2.meetingLanguage, .chinese)
+        // 没开过字幕时,"本场"跟随设置 —— 否则中文用户重启后第一屏会按英文渲染译文栏
+        XCTAssertEqual(s2.sessionLanguage, .chinese)
     }
 
     // MARK: - 会议语种(Task 7)
@@ -80,18 +84,42 @@ final class SubtitleSettingsTests: XCTestCase {
 
     func testEffectiveDisplayModeCollapsesForChineseMeeting() {
         let s = SubtitleStore(defaults: freshSuite())
-        s.meetingLanguage = .chinese
+        s.sessionLanguage = .chinese
         // 中文会议无译文:任何模式都退化为纯原文,否则终句永远卡「翻译中…」
         for mode in DisplayMode.allCases {
             s.displayMode = mode
             XCTAssertEqual(s.effectiveDisplayMode, .originalOnly, "\(mode) 下中文会议应退化为原文")
         }
         // 英文会议照旧透传
-        s.meetingLanguage = .english
+        s.sessionLanguage = .english
         for mode in DisplayMode.allCases {
             s.displayMode = mode
             XCTAssertEqual(s.effectiveDisplayMode, mode)
         }
+    }
+
+    func testEffectiveDisplayModeFollowsSessionNotSetting() {
+        let s = SubtitleStore(defaults: freshSuite())
+        s.displayMode = .both
+        s.sessionLanguage = .english          // 屏上是英文会议的行,带译文
+        s.meetingLanguage = .chinese          // 用户已为【下一场】选了中文
+        // 改设置不该把屏上已有的英文行连带打回纯原文(译文会当场消失)
+        XCTAssertEqual(s.effectiveDisplayMode, .both)
+    }
+
+    func testSessionLanguageAndIsRunningAreTransient() {
+        let suite = freshSuite()
+        let s1 = SubtitleStore(defaults: suite)
+        s1.sessionLanguage = .chinese
+        s1.isRunning = true
+        // 同 layoutEditing:直接查底层 key,断言瞬态语义没被误加的持久化 didSet 破坏
+        XCTAssertNil(suite.object(forKey: "ls.sessionLanguage"),
+                     "sessionLanguage 不应写入 UserDefaults(瞬态语义被破坏)")
+        XCTAssertNil(suite.object(forKey: "ls.isRunning"),
+                     "isRunning 不应写入 UserDefaults(瞬态语义被破坏)")
+        let s2 = SubtitleStore(defaults: suite)
+        XCTAssertFalse(s2.isRunning)          // 启动永远 false
+        XCTAssertEqual(s2.sessionLanguage, .english)   // 跟随未被改动的 meetingLanguage
     }
 
     func testLayoutEditingIsTransient() {
