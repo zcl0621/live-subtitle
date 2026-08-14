@@ -43,9 +43,15 @@ final class SpeakerAttributorTests: XCTestCase {
     /// 3s @16k 的假样本(内容无所谓,mock 不看)。
     private static let pcm3s = [Int16](repeating: 1000, count: 48000)
 
+    /// 判定逻辑的测试显式注入 minDuration,不吃默认值 —— 这些用例测的是
+    /// 「够长就抽取、太短就回退」的行为,不该在阈值调参时集体失灵。
+    /// 默认值本身由 `testDefaultsMatchProbeCalibration` 单独钉住。
     private func makeAttributor(_ behavior: MockExtractor.Behavior,
-                                meProfiles: [[Float]] = []) -> SpeakerAttributor {
-        SpeakerAttributor(extractor: MockExtractor(behavior: behavior), meProfiles: meProfiles)
+                                meProfiles: [[Float]] = [],
+                                minDuration: Double = 2.0) -> SpeakerAttributor {
+        SpeakerAttributor(extractor: MockExtractor(behavior: behavior),
+                          meProfiles: meProfiles,
+                          minDuration: minDuration)
     }
 
     // MARK: - 短句 / 切片失效回退
@@ -106,7 +112,8 @@ final class SpeakerAttributorTests: XCTestCase {
         // 沿用上次身份合理;抽取失败是「有证据但坏了」,宁可不标(unresolved)
         // 也不拿旧身份冒充这句的判定结果。
         let a = SpeakerAttributor(
-            extractor: SequenceExtractor([.success(Self.unit(0)), .failure]), meProfiles: [])
+            extractor: SequenceExtractor([.success(Self.unit(0)), .failure]),
+            meProfiles: [], minDuration: 2.0)
         let first = await a.attribute(track: .system, range: 0.0..<3.0, pcm: Self.pcm3s)
         XCTAssertEqual(first.kind, .cluster(0))
         let second = await a.attribute(track: .system, range: 3.0..<6.0, pcm: Self.pcm3s)
@@ -132,10 +139,23 @@ final class SpeakerAttributorTests: XCTestCase {
     }
 
     func testExactlyMinDurationExtracts() async {
-        let a = makeAttributor(.success(Self.unit(0)))
+        let a = makeAttributor(.success(Self.unit(0)), minDuration: 2.0)
         let id = await a.attribute(track: .system, range: 0.0..<2.0,
                                    pcm: [Int16](repeating: 1, count: 32000))
-        XCTAssertEqual(id.kind, .cluster(0))   // >= 2.0s 走抽取,不回退
+        XCTAssertEqual(id.kind, .cluster(0))   // 恰好等于下限也走抽取,不回退
+    }
+
+    /// 钉住 P6c 标定的默认值。改这三个数之前先看 probes/RESULTS.md 的 P6c 章节:
+    /// 它们是拿「多窗平均注册档案 × 会话短句」的实测分布定的,不是拍的。
+    func testDefaultsMatchProbeCalibration() async {
+        // 默认 minDuration=4.0:3s 的句子应走回退而非抽取
+        let a = SpeakerAttributor(extractor: MockExtractor(behavior: .success(Self.unit(0))),
+                                  meProfiles: [])
+        let short = await a.attribute(track: .mic, range: 0.0..<3.0, pcm: Self.pcm3s)
+        XCTAssertEqual(short.kind, .unresolved, "3s < 默认下限 4.0s,应回退而不是抽取")
+        let long = await a.attribute(track: .mic, range: 0.0..<5.0,
+                                     pcm: [Int16](repeating: 1000, count: 80000))
+        XCTAssertEqual(long.kind, .cluster(0), "5s ≥ 默认下限,应走抽取")
     }
 
     // MARK: - reset

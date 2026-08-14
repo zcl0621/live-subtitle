@@ -9,16 +9,22 @@ import Foundation
 actor SpeakerAttributor {
     private let extractor: any VoiceprintExtractor
     private let clusterer: SpeakerClusterer
-    /// 低于此时长不抽 embedding(P6a 实测:短句向量不稳,2.0s 是可靠下限)。
+    /// 低于此时长不抽 embedding。P6c 实测(注册档案 × 会话短句,probes/RESULTS.md):
+    /// 3s 句的同人最低余弦 0.485、异人最高 0.410 —— 间隔只剩 +0.075,判定已不可靠;
+    /// 5s 句才回到 +0.272。故下限取 4.0s,更短的句子宁可沿用上一句身份。
     private let minDuration: Double
     /// 每轨上一次成功判定的身份;短句/切片失效时沿用(说话人通常不会一句一换)。
     private var lastIdentity: [Track: SpeakerID] = [:]
 
     init(extractor: any VoiceprintExtractor,
          meProfiles: [[Float]],
-         thresholdMe: Float = 0.70,      // P6a 实测
-         thresholdCluster: Float = 0.60, // P6a 实测
-         minDuration: Double = 2.0) {
+         // P6c 定值(替代 P6a 的 0.70/0.60):P6a 是「整段 vs 整段」标定的,
+         // 而真实链路是「多窗平均的注册档案 × 会话里一条几秒的终句」——
+         // 后者同人余弦系统性偏低(5s 句最低 0.677),0.70 会把自己判成别人。
+         // 异人最高只有 0.42,故下调仍有充足余量,且保持 θ_me > θ_cluster 的不对称。
+         thresholdMe: Float = 0.60,
+         thresholdCluster: Float = 0.50,
+         minDuration: Double = 4.0) {
         self.extractor = extractor
         self.clusterer = SpeakerClusterer(meProfiles: meProfiles,
                                           thresholdMe: thresholdMe,
