@@ -11,9 +11,14 @@ final class CaptionEngine {
     private var lastVolatileSource: [Track: String] = [:]   // 每轨上次已送翻译的中间态,去重
     private var volatileInFlight: Set<Track> = []           // 每轨是否有中间态翻译在途,防叠
     private var stopped = false                               // stop 后为 true,阻止旧 consume 继续写共享 store
-    /// 声纹链路。extractor 持具体类型(prepare 不在 protocol 上),attributor 拿协议接缝。
-    private let extractor = FluidAudioExtractor()
+    /// 进程级共享声纹抽取器(持具体类型:prepare 不在 protocol 上,attributor 拿协议接缝)。
+    /// 共享而非 per-engine:模型加载 + ~3s CoreML 预热整个进程只付一次(prepare 幂等);
+    /// 丢弃的 engine 不会被慢速首次下载的 prepare 钩住不释放;快速 stop/start 也不会
+    /// 并发跑两个 downloadIfNeeded 打同一个模型目录。
+    static let sharedExtractor = FluidAudioExtractor()
     private let attributor: SpeakerAttributor
+    /// 声纹模型就绪后才为终句起归属 Task;未就绪时省掉每句白付的切片 + Float 转换 + 两次 actor 跳跃。
+    private var attributionReady = false
 
     /// 默认双轨:对方(系统音)+ 我(麦克风)。测试可注入自定义轨。
     init(store: SubtitleStore, tracks: [(AudioSource, TranscriptionPipeline)]? = nil) {
@@ -24,16 +29,22 @@ final class CaptionEngine {
         ]
         self.tracks = built.map { TrackBundle(source: $0.0, pipeline: $0.1, translator: TranslationService()) }
         // 「我」的声纹档案读不出(首次运行/损坏)就当没有档案:仍能聚类,只是没人判成 .me
+        // TODO(Task 8): 按 modelID 过滤档案(!= FluidAudioExtractor.modelID 的旧档案不该进聚类)
         let meProfiles = (try? VoiceprintStore())?.meEmbeddings ?? []
-        self.attributor = SpeakerAttributor(extractor: extractor, meProfiles: meProfiles)
+        self.attributor = SpeakerAttributor(extractor: Self.sharedExtractor, meProfiles: meProfiles)
     }
 
     func start(onError: @escaping @MainActor (String) -> Void) {
         // 声纹模型预热:首次要下载(~13MB)+ ~3s CoreML 预热,放后台跑,
         // 字幕主链路不等它;失败非致命 —— 上报一次,说话人保持 unresolved。
-        tasks.append(Task {
-            do { try await extractor.prepare() }
-            catch { onError("声纹模型准备失败:\(error.localizedDescription) — 本场说话人标注不可用,字幕不受影响") }
+        // [weak self]:prepare 慢(首次下载可达分钟级)时不钩住已丢弃的 engine。
+        tasks.append(Task { @MainActor [weak self] in
+            do {
+                try await Self.sharedExtractor.prepare()
+                self?.attributionReady = true
+            } catch {
+                onError("声纹模型准备失败:\(error.localizedDescription) — 本场说话人标注不可用,字幕不受影响")
+            }
         })
         // 每轨独立翻译服务,逐一暖机;中文包未装只报一次(失败即停,不刷屏)
         tasks.append(Task {
@@ -58,8 +69,11 @@ final class CaptionEngine {
                             if e.isFinal {
                                 let id = store.commitFinal(track: track.source.track, text: e.text)
                                 lastVolatileSource[track.source.track] = nil   // 定稿后清去重,下句同短语也能边说边译
-                                // 声纹归属:异步判定后按 id 回填,不阻塞翻译/上屏
-                                if let range = e.audioRange {
+                                // 声纹归属:异步判定后按 id 回填,不阻塞翻译/上屏。
+                                // 模型未就绪不起 Task(免得每句白付切片 + Float 转换 + 两次
+                                // actor 跳跃只为吃个 notPrepared);就绪前的终句保持
+                                // .unresolved —— 事后补判定留作后续 polish。
+                                if attributionReady, let range = e.audioRange {
                                     let pipeline = track.pipeline
                                     let tr = track.source.track
                                     Task { @MainActor [attributor, store] in

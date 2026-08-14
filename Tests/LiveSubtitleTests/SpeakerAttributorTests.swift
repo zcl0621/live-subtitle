@@ -19,6 +19,20 @@ private struct MockExtractor: VoiceprintExtractor {
     }
 }
 
+/// 有状态假抽取器:按调用顺序逐个消费 behavior,耗尽后一律失败。
+private actor SequenceExtractor: VoiceprintExtractor {
+    private var behaviors: [MockExtractor.Behavior]
+    init(_ behaviors: [MockExtractor.Behavior]) { self.behaviors = behaviors }
+
+    func embed(_ samples: [Float]) async throws -> [Float] {
+        guard !behaviors.isEmpty else { throw MockExtractor.Boom() }
+        switch behaviors.removeFirst() {
+        case .success(let v): return v
+        case .failure: throw MockExtractor.Boom()
+        }
+    }
+}
+
 final class SpeakerAttributorTests: XCTestCase {
     /// 4 维单位向量(维度对聚类逻辑无所谓,余弦只看方向)。
     private static func unit(_ hot: Int) -> [Float] {
@@ -51,6 +65,13 @@ final class SpeakerAttributorTests: XCTestCase {
         XCTAssertEqual(second, first)   // 沿用上次身份
     }
 
+    func testEmptyPcmSliceFallsBack() async {
+        let a = makeAttributor(.success(Self.unit(0)))
+        // 非 nil 但空数组的切片同样走回退(!pcm.isEmpty 分支)
+        let id = await a.attribute(track: .system, range: 0.0..<3.0, pcm: [])
+        XCTAssertEqual(id, .unresolved(.system))
+    }
+
     func testNilSliceLongUtteranceFallsBack() async {
         let a = makeAttributor(.success(Self.unit(0)))
         // 时长够但切片拿不到(已被环形覆盖)→ 同样走回退
@@ -78,6 +99,18 @@ final class SpeakerAttributorTests: XCTestCase {
         _ = await a.attribute(track: .mic, range: 0.0..<3.0, pcm: Self.pcm3s)
         let short = await a.attribute(track: .mic, range: 3.0..<4.0, pcm: nil)
         XCTAssertEqual(short, .unresolved(.mic))   // 失败不算「上次身份」
+    }
+
+    func testFailureAfterSuccessReturnsUnresolvedNotLastIdentity() async {
+        // 刻意的不对称,钉死别被"顺手统一"掉:短句/无切片是「没有新证据」,
+        // 沿用上次身份合理;抽取失败是「有证据但坏了」,宁可不标(unresolved)
+        // 也不拿旧身份冒充这句的判定结果。
+        let a = SpeakerAttributor(
+            extractor: SequenceExtractor([.success(Self.unit(0)), .failure]), meProfiles: [])
+        let first = await a.attribute(track: .system, range: 0.0..<3.0, pcm: Self.pcm3s)
+        XCTAssertEqual(first.kind, .cluster(0))
+        let second = await a.attribute(track: .system, range: 3.0..<6.0, pcm: Self.pcm3s)
+        XCTAssertEqual(second, .unresolved(.system))   // 不是 first
     }
 
     // MARK: - 成功路径
