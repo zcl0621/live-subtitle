@@ -70,9 +70,18 @@ final class CaptionEngine {
         // 也不会因用户没装中文语言包而弹一条与本场无关的报错。
         if meetingLanguage.needsTranslation {
             tasks.append(Task {
+                var reported = false
                 for track in tracks {
                     do { try await track.translator.warmUp() }
-                    catch { onError("请在 系统设置→通用→语言与地区→翻译语言 安装 中文(简体)"); break }
+                    catch {
+                        // 只报一次(不刷屏),但**每条轨都要试** —— 老实现在这里 break,
+                        // 于是第一条轨暖机失败会连累第二条轨压根不暖机,即使它本可以正常翻译。
+                        // 且暖机失败不再是终局:translate 里会重建 session 自愈(见 TranslationService)。
+                        if !reported {
+                            onError("请在 系统设置→通用→语言与地区→翻译语言 安装 中文(简体)")
+                            reported = true
+                        }
+                    }
                 }
             })
         }
