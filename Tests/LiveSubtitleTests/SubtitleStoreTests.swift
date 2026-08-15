@@ -241,14 +241,46 @@ final class SubtitleStoreTests: XCTestCase {
         XCTAssertFalse(s.lines[0].isFinal)          // 遗留灰字仍是灰字,不会被本场定稿
     }
 
-    // 停止时 SpeakerAttributor.reset() 已清簇:本场的「说话人 2」与上一场多半不是同一个人,
-    // 留着改名映射 = 自信地叫错人(与 speakerNames 不持久化同一条理由)
-    func testBeginSessionClearsRenames() {
+    // 本场是全新 clusterer(簇号从 0 重编),本场的「说话人 2」与上一场多半不是同一个人,
+    // 留着改名映射 = 自信地叫错人(与 speakerNames 不持久化同一条理由)。
+    // 但作废的时刻是【本场第一条终句】,不是 beginSession —— 见下一条。
+    func testFirstFinalOfNewSessionClearsRenames() {
         let s = SubtitleStore()
         let speaker = SpeakerID(track: .system, kind: .cluster(1))
         s.rename(speaker, to: "张三")
         s.beginSession(language: .english)
+        _ = s.commitFinal(track: .system, text: "本场第一句")
         XCTAssertTrue(s.speakerNames.isEmpty)
         XCTAssertEqual(s.displayName(for: speaker), "说话人 2")
+    }
+
+    // 改名的作废时刻必须与导出锚点同步。停止→(误)重开→本场还没出终句时导出,
+    // 取的仍是上一场的行(ObsidianExporter.lastSessionLines 锚在最后一条终句);
+    // 若 beginSession 当场清了映射,这一篇就会拿空映射去导上一场,「老王」变回「说话人 2」。
+    func testRenamesSurviveUntilNewSessionProducesAFinal() {
+        let s = SubtitleStore()
+        let speaker = SpeakerID(track: .system, kind: .cluster(1))
+        _ = s.commitFinal(track: .system, text: "上一场")
+        s.rename(speaker, to: "老王")
+
+        s.beginSession(language: .english)                  // 停止 → 重开
+        s.upsertVolatile(track: .mic, text: "本场还在说")     // 灰字不挪锚点
+        XCTAssertEqual(s.speakerNames[speaker.kind], "老王", "本场还没出终句,上一场的改名不该没")
+        XCTAssertEqual(s.displayName(for: speaker), "老王")
+
+        _ = s.commitFinal(track: .mic, text: "本场第一句")     // 锚点挪到本场 → 同一刻作废
+        XCTAssertTrue(s.speakerNames.isEmpty)
+    }
+
+    // 只清一次:本场后续的改名不该被上一场遗留的「待作废」标记连坐清掉
+    func testRenameExpiryFiresOnlyOnce() {
+        let s = SubtitleStore()
+        let speaker = SpeakerID(track: .system, kind: .cluster(0))
+        s.rename(speaker, to: "上一场的名字")
+        s.beginSession(language: .english)
+        _ = s.commitFinal(track: .system, text: "第一句")     // 作废发生在这里
+        s.rename(speaker, to: "本场的名字")
+        _ = s.commitFinal(track: .system, text: "第二句")
+        XCTAssertEqual(s.speakerNames[speaker.kind], "本场的名字")
     }
 }

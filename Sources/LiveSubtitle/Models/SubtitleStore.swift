@@ -98,6 +98,14 @@ final class SubtitleStore {
     /// 改了一个却只有一半的行跟着变。
     var speakerNames: [SpeakerID.Kind: String] = [:]
 
+    /// 上一场的改名映射已过期,但**还没作废** —— 等本场第一条终句到来时才清。
+    ///
+    /// 为什么不在 `beginSession` 当场清:导出锚在【最后一条终句】所在的那一场
+    /// (`ObsidianExporter.lastSessionLines`),本场还没出终句时,该导出的仍是上一场那批行。
+    /// 当场清就会拿一份空映射去导上一场的行,用户刚改的「老王」在笔记里变回「说话人 2」。
+    /// 两处必须用同一个时刻切换:第一条终句既把导出锚点挪到本场,也让上一场的改名作废。
+    private var renamesPendingExpiry = false
+
     /// 每条轨的"当前未定稿灰字行"id;定稿后清除。
     /// 用 id(而非绝对下标),这样截断旧行后仍能正确定位,不会失效或错位。
     private var volatileIndex: [Track: UUID] = [:]
@@ -156,8 +164,16 @@ final class SubtitleStore {
         // 上一场章的行,定稿后既插在历史中间、又落在本场的导出分段之外。
         volatileIndex.removeAll()
         pendingVolatile.removeAll()
-        // 改名同样作废:停止时 `SpeakerAttributor.reset()` 已清簇,本场的「说话人 2」
-        // 与上一场多半不是同一个人。留着映射 = 自信地叫错人(理由同 speakerNames 的瞬态)。
+        // 改名同样要作废(本场是全新 clusterer,簇号从 0 重编,本场的「说话人 2」与上一场
+        // 多半不是同一个人;留着映射 = 自信地叫错人),但**推迟到本场第一条终句**再清
+        // —— 在那之前导出取的还是上一场的行,理由见 renamesPendingExpiry。
+        renamesPendingExpiry = true
+    }
+
+    /// 本场产出第一条终句 = 导出锚点从上一场挪到本场,上一场的改名就此作废。
+    private func expireRenamesIfNeeded() {
+        guard renamesPendingExpiry else { return }
+        renamesPendingExpiry = false
         speakerNames.removeAll()
     }
 
@@ -203,6 +219,7 @@ final class SubtitleStore {
     /// 把当前灰字行原地提升为终句(同 id)。若无灰字行则新建一条终句。返回该行 id。
     @discardableResult
     func commitFinal(track: Track, text: String) -> UUID {
+        expireRenamesIfNeeded()        // 本场第一条终句 → 上一场的改名作废(与导出锚点同一刻)
         pendingVolatile[track] = nil   // 定稿后丢弃陈旧暂存中间态
         if let id = volatileIndex[track], let i = index(of: id) {
             lines[i].original = text

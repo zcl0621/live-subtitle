@@ -63,7 +63,12 @@ actor SpeakerAttributor {
         }
     }
 
-    /// 会话结束调:清空聚类簇与每轨记忆,别把这场会议的人带进下一场。
+    /// 清空聚类簇与每轨记忆。
+    ///
+    /// ⚠️ **不要把它接回 `CaptionEngine.stop()`** —— 那正是它被摘掉的地方。会话边界靠生命周期
+    /// 守:attributor 是 per-engine 的 let,下一场是全新 engine + 全新 clusterer,簇号自然从 0 重编。
+    /// 在 stop 里调则会与还在途的归属 Task 抢跑,把最后一句判在空 clusterer 上(理由写在 stop 里)。
+    /// 保留本方法是给"原地复用一个 attributor 开下一场"的将来用的,今天没有这种调用方。
     func reset() {
         clusterer.reset()
         lastIdentity.removeAll()

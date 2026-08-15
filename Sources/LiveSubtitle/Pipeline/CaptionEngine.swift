@@ -174,14 +174,23 @@ final class CaptionEngine {
         tasks.forEach { $0.cancel() }; tasks = []
         let tracks = self.tracks
         // 先并发停所有采集源(麦克风立即停录),再并发收尾所有 pipeline
-        Task { [attributor] in
+        //
+        // **这里不调 `attributor.reset()`**,尽管"别把这场的说话人带进下一场"确实是要守的。
+        // 守它的是生命周期而不是这一句:attributor 是 per-engine 的 let,下一场由
+        // LiveSubtitleApp 新建一个 CaptionEngine,连着新的 SpeakerClusterer(centroids 空、
+        // 簇号从 0 重新编),旧的随 `engine = nil` 一起丢。
+        //
+        // 而调它反倒有害:上面 101 行起的归属 Task 不进 `tasks`、不被取消,它们第一跳
+        // `pipeline.sliceAudio` 会排在下面 `pipeline.stop()` 后面 —— 那一句要 await
+        // `finalizeAndFinishThroughEndOfInput()`,可达数百 ms。等切片回来时 reset 早已落地,
+        // 判定就在一个空 clusterer 上跑,最后一句必然被标成新簇「说话人 1」。
+        Task {
             await withTaskGroup(of: Void.self) { g in
                 for t in tracks { g.addTask { await t.source.stop() } }
             }
             await withTaskGroup(of: Void.self) { g in
                 for t in tracks { g.addTask { await t.pipeline.stop() } }
             }
-            await attributor.reset()   // 会话结束清簇,别把这场的说话人带进下一场
         }
     }
 }

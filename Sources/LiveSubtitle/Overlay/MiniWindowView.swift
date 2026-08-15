@@ -13,6 +13,12 @@ struct MiniWindowView: View {
         VStack(spacing: 0) {
             if let target = renaming {
                 renameBar(target)
+                    // 取焦必须等 TextField 真的进了视图树。在 beginRename 里写
+                    // `nameFieldFocused = true` 是同一次更新内的事,那会儿这条 bar 还没插进来,
+                    // 焦点绑定没有落点、被直接丢弃 —— 改名条弹出来却没有光标,敲字进不去、⏎ 也不提交。
+                    // `.id(target)`:改名途中点了别的说话人时强制重建,好让 onAppear 再跑一次。
+                    .id(target)
+                    .onAppear { nameFieldFocused = true }
             }
             ScrollViewReader { proxy in
                 ScrollView {
@@ -64,7 +70,7 @@ struct MiniWindowView: View {
         renaming = speaker
         // 已改过就带出现有的名字直接改;没改过留空,占位符提示默认名会被顶掉
         draftName = store.speakerNames[speaker.kind] ?? ""
-        nameFieldFocused = true
+        // 取焦交给 renameBar 的 onAppear —— 这里设了也没用,理由写在那儿
     }
 
     /// 空名 = 恢复默认(store.rename 负责),不是存一个空标签。
