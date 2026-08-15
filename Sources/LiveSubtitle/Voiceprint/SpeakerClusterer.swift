@@ -50,30 +50,21 @@ final class SpeakerClusterer {
             let s = Self.cosine(c, embedding)
             if s > bestScore { bestScore = s; bestIdx = i }
         }
-        lslog(String(format: "  判定 我档案=%d 份 meScore=%.3f(θ_me=%.2f) 已有%d簇 最高簇分=%@(θ_cluster=%.2f θ_new=%.2f)",
-                     meProfiles.count, meScore, thresholdMe, centroids.count,
-                     bestIdx >= 0 ? String(format: "%.3f→簇%d", bestScore, bestIdx) : "无",
-                     thresholdCluster, thresholdNew))
         if meScore >= thresholdMe {
-            lslog("  → 判为【我】")
             return .me
         }
         if bestIdx >= 0, bestScore >= thresholdCluster {
             update(cluster: bestIdx, with: embedding)
-            lslog("  → 并入【说话人 \(bestIdx + 1)】")
             return .cluster(bestIdx)
         }
         // 3) 死区:像得不够、又不够陌生。多半是这一句坏了,别拿它造新人,
         //    也**别拿它更新任何簇心** —— 一个被污染的向量掺进簇心会连累后面所有判定。
         if bestIdx >= 0, bestScore >= thresholdNew {
-            lslog("  → 落在死区(\(String(format: "%.3f", bestScore)) ∈ [\(thresholdNew), \(thresholdCluster)))" +
-                  ",不新建簇,沿用上一句身份")
             return .uncertain
         }
         // 4) 新建簇。没有任何簇时(bestIdx < 0)也走这里 —— 第一句总得开张。
         centroids.append(embedding)
         counts.append(1)
-        lslog("  → 新建【说话人 \(centroids.count)】")
         return .cluster(centroids.count - 1)
     }
 

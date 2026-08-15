@@ -56,12 +56,7 @@ actor SpeakerAttributor {
     func attribute(track: Track, range: Range<Double>, pcm: [Int16]?) async -> SpeakerID {
         let duration = range.upperBound - range.lowerBound
         guard duration >= minDuration, let pcm, !pcm.isEmpty else {
-            let fallback = lastIdentity[track] ?? .unresolved(track)
-            lslog(String(format: "  判定跳过 [%@] 时长%.2fs(下限%.1fs) pcm=%@ → 回退 %@",
-                         track.rawValue, duration, minDuration,
-                         pcm.map { "\($0.count)样本" } ?? "nil",
-                         String(describing: fallback.kind)))
-            return fallback
+            return lastIdentity[track] ?? .unresolved(track)
         }
         do {
             let embedding = try await extractor.embed(PCMConvert.int16ToFloat(pcm))
@@ -80,7 +75,6 @@ actor SpeakerAttributor {
                 return lastIdentity[track] ?? .unresolved(track)
             }
         } catch {
-            lslog("  判定失败 [\(track.rawValue)] 抽取抛错:\(error) → unresolved")
             return .unresolved(track)
         }
     }

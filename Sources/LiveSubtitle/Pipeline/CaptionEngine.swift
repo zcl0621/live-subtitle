@@ -10,7 +10,6 @@ final class CaptionEngine {
     private var volatileTranslateTask: Task<Void, Never>?
     private var lastVolatileSource: [Track: String] = [:]   // 每轨上次已送翻译的中间态,去重
     private var volatileInFlight: Set<Track> = []           // 每轨是否有中间态翻译在途,防叠
-    private var volatileSeen: [Track: Int] = [:]            // 临时诊断计数(随 Diagnostics.swift 一并撤)
     private var stopped = false                               // stop 后为 true,阻止旧 consume 继续写共享 store
     /// 进程级共享声纹抽取器(持具体类型:prepare 不在 protocol 上,attributor 拿协议接缝)。
     /// 共享而非 per-engine:模型加载 + ~3s CoreML 预热整个进程只付一次(prepare 幂等);
@@ -52,12 +51,6 @@ final class CaptionEngine {
                                             thresholdMe: Float(store.thresholdMe),
                                             thresholdCluster: Float(store.thresholdCluster),
                                             minDuration: store.minUtteranceSeconds)
-        lslog("""
-            ================ 开一场 ================
-            语种=\(language.rawValue) 我的声纹档案=\(meProfiles.count) 份\
-            (维度 \(meProfiles.first?.count.description ?? "-"))
-            θ_me=\(store.thresholdMe) θ_cluster=\(store.thresholdCluster) 短句下限=\(store.minUtteranceSeconds)s
-            """)
     }
 
     func start(onError: @escaping @MainActor (String) -> Void) {
@@ -68,9 +61,7 @@ final class CaptionEngine {
             do {
                 try await Self.sharedExtractor.prepare()
                 self?.attributionReady = true
-                lslog("attributionReady = true(从此刻起的终句才会判定)")
             } catch {
-                lslog("❌ 声纹模型准备失败:\(error) — 本场所有终句都不会判定")
                 onError("声纹模型准备失败:\(error.localizedDescription) — 本场说话人标注不可用,字幕不受影响")
             }
         })
@@ -87,22 +78,14 @@ final class CaptionEngine {
         }
         // 每条轨:接 onError → ensureModel → start → 消费 + 喂
         for track in tracks {
-            let tr = track.source.track
-            track.source.onError = { msg in
-                lslog("❌ 采集源报错 [\(tr.rawValue)]:\(msg)")
-                Task { @MainActor in onError(msg) }
-            }
+            track.source.onError = { msg in Task { @MainActor in onError(msg) } }
             tasks.append(Task {
                 do {
-                    lslog("轨[\(tr.rawValue)] ensureModel…")
                     try await track.pipeline.ensureModel()
-                    lslog("轨[\(tr.rawValue)] ensureModel ok")
                     // 识别流中途抛错 → 上报,避免字幕静默冻结
                     let events = try await track.pipeline.start(onError: { msg in
-                        lslog("❌ 识别流报错 [\(tr.rawValue)]:\(msg)")
                         Task { @MainActor in onError(msg) }
                     })
-                    lslog("轨[\(tr.rawValue)] analyzer 已启动")
                     let consume = Task { @MainActor in
                         for await e in events {
                             if stopped { break }   // stop 后不再写共享 store(防旧会话污染快速重启的新会话)
@@ -113,11 +96,6 @@ final class CaptionEngine {
                                 // 模型未就绪不起 Task(免得每句白付切片 + Float 转换 + 两次
                                 // actor 跳跃只为吃个 notPrepared);就绪前的终句保持
                                 // .unresolved —— 事后补判定留作后续 polish。
-                                lslog(String(format: "终句 [%@] ready=%@ range=%@ 「%@」",
-                                             track.source.track.rawValue,
-                                             attributionReady ? "是" : "否(模型未就绪,本句不判)",
-                                             e.audioRange.map { String(format: "%.2f..%.2f(%.2fs)", $0.lowerBound, $0.upperBound, $0.upperBound - $0.lowerBound) } ?? "nil(拿不到时间轴,本句不判)",
-                                             String(e.text.prefix(40))))
                                 if attributionReady, let range = e.audioRange {
                                     let pipeline = track.pipeline
                                     let tr = track.source.track
@@ -138,25 +116,13 @@ final class CaptionEngine {
                                     }
                                 }
                             } else {
-                                // 中间态量大,只在首条和每 25 条报一次 —— 有中间态却没终句,
-                                // 与压根没中间态,是两个完全不同的故障。
-                                volatileSeen[tr, default: 0] += 1
-                                let n = volatileSeen[tr] ?? 0
-                                if n % 25 == 1 {
-                                    lslog("中间态 [\(tr.rawValue)] 第\(n)条「\(String(e.text.suffix(30)))」")
-                                }
                                 store.stageVolatile(track: track.source.track, text: e.text)
                             }
                         }
                     }
-                    lslog("轨[\(tr.rawValue)] 开始消费采集帧")
-                    var fed = 0
                     for await frame in track.source.frames() {
                         await track.pipeline.feed(frame)
-                        fed += 1
-                        if fed % 200 == 1 { lslog("轨[\(tr.rawValue)] 已喂 \(fed) 帧进 analyzer") }
                     }
-                    lslog("轨[\(tr.rawValue)] 采集流结束,共喂 \(fed) 帧")
                     await consume.value
                 } catch is CancellationError {
                     // 用户主动停止,不当作错误上报
