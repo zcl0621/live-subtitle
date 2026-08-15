@@ -20,9 +20,6 @@ final class SpeakerClusterer {
     func assign(_ embedding: [Float], track: Track) -> SpeakerID {
         // 1) 先看是不是「我」——中英两份档案取 max
         let meScore = meProfiles.map { Self.cosine($0, embedding) }.max() ?? -1
-        if meScore >= thresholdMe {
-            return SpeakerID(track: track, kind: .me)
-        }
         // 2) 再看归入哪个已有簇
         var bestIdx = -1
         var bestScore = -Float.infinity
@@ -30,13 +27,23 @@ final class SpeakerClusterer {
             let s = Self.cosine(c, embedding)
             if s > bestScore { bestScore = s; bestIdx = i }
         }
+        lslog(String(format: "  判定 [%@] 我档案=%d 份 meScore=%.3f(θ_me=%.2f) 已有%d簇 最高簇分=%@(θ_cluster=%.2f)",
+                     track.rawValue, meProfiles.count, meScore, thresholdMe, centroids.count,
+                     bestIdx >= 0 ? String(format: "%.3f→簇%d", bestScore, bestIdx) : "无",
+                     thresholdCluster))
+        if meScore >= thresholdMe {
+            lslog("  → 判为【我】")
+            return SpeakerID(track: track, kind: .me)
+        }
         if bestIdx >= 0, bestScore >= thresholdCluster {
             update(cluster: bestIdx, with: embedding)
+            lslog("  → 并入【说话人 \(bestIdx + 1)】")
             return SpeakerID(track: track, kind: .cluster(bestIdx))
         }
         // 3) 新建簇
         centroids.append(embedding)
         counts.append(1)
+        lslog("  → 新建【说话人 \(centroids.count)】")
         return SpeakerID(track: track, kind: .cluster(centroids.count - 1))
     }
 

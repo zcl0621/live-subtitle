@@ -12,10 +12,19 @@ import CoreGraphics
 enum PermissionsManager {
     /// 在真正要用权限时调用(点「开始字幕」)。非阻塞:两项各自异步触发系统授权框,忽略结果。
     static func requestAll() {
-        // ① 麦克风:异步弹权限框,不关心结果。
-        AVCaptureDevice.requestAccess(for: .audio) { _ in }
+        // ① 麦克风:已授权就别再调 —— requestAccess 在已授权时本就不弹框,但显式跳过
+        // 能让日志把"到底谁在弹"分辨出来(排"一次启动弹很多次"时唯一能用的线索)。
+        let mic = AVCaptureDevice.authorizationStatus(for: .audio)
+        lslog("requestAll:麦克风当前状态=\(mic.rawValue)(0=未决 1=受限 2=拒绝 3=已授权)")
+        if mic == .notDetermined {
+            lslog("requestAll:→ 弹麦克风授权框")
+            AVCaptureDevice.requestAccess(for: .audio) { ok in
+                lslog("requestAll:麦克风授权结果=\(ok)")
+            }
+        }
 
         // ② 屏幕录制(系统音频采集依赖此授权)。
+        lslog("requestAll:屏幕录制已授权=\(CGPreflightScreenCaptureAccess())")
         // 仅在尚未授权时触发系统授权引导。CGRequestScreenCaptureAccess 是同步阻塞的
         // C API,放到后台队列执行以免阻塞主线程弹窗时机;它只触发 TCC,无需回主线程更新 UI。
         if CGPreflightScreenCaptureAccess() == false {

@@ -11,13 +11,18 @@ actor SpeakerAttributor {
     /// SubtitleStore 的设置默认值、文档里引用的数字都指向这里。改它们之前先看那一节。
     static let defaultThresholdMe: Float = 0.60
     static let defaultThresholdCluster: Float = 0.50
-    static let defaultMinDuration: Double = 4.0
+    /// P6d 重标(2026-08-15):原为 4.0s,真机日志显示那把 78% 的终句挡在判定之外,
+    /// 全靠「沿用上一句身份」撑着。P6d 实测异人余弦最高只到 0.404,**任何句长下硬错都是 0**
+    /// (认不成「我」、并不到别人头上),降下限只多一点软错(2.0s 时同人被拆 6%)。
+    static let defaultMinDuration: Double = 2.0
 
     private let extractor: any VoiceprintExtractor
     private let clusterer: SpeakerClusterer
-    /// 低于此时长不抽 embedding。P6c 实测(注册档案 × 会话短句,probes/RESULTS.md):
-    /// 3s 句的同人最低余弦 0.485、异人最高 0.410 —— 间隔只剩 +0.075,判定已不可靠;
-    /// 5s 句才回到 +0.272。故下限取 4.0s,更短的句子宁可沿用上一句身份。
+    /// 低于此时长不抽 embedding,沿用上一句身份。定值与推翻过的假设见 probes/RESULTS.md §P6d:
+    /// 关键是**异人余弦在任何句长下都够不着阈值**(最高 0.404),所以这个下限管的不是「会不会认错人」,
+    /// 而是「会不会把同一个人拆成两个说话人」—— 一个软退化,不是硬错。
+    /// 也**别再想着按 me/cluster 拆成两个下限**:P6d 实测两条路径的分布几乎重合,拆了反而会让
+    /// 自己 2–4 秒的句子跳过「我」的比对被标成「说话人 N」。
     private let minDuration: Double
     /// 本场定格的阈值。clusterer 自己也存了一份用于判定,这两个是对外可读的同一批值
     /// —— 供调用方/测试核对「设置页改的数到底有没有传进来」,不必撬开 clusterer。
@@ -51,7 +56,12 @@ actor SpeakerAttributor {
     func attribute(track: Track, range: Range<Double>, pcm: [Int16]?) async -> SpeakerID {
         let duration = range.upperBound - range.lowerBound
         guard duration >= minDuration, let pcm, !pcm.isEmpty else {
-            return lastIdentity[track] ?? .unresolved(track)
+            let fallback = lastIdentity[track] ?? .unresolved(track)
+            lslog(String(format: "  判定跳过 [%@] 时长%.2fs(下限%.1fs) pcm=%@ → 回退 %@",
+                         track.rawValue, duration, minDuration,
+                         pcm.map { "\($0.count)样本" } ?? "nil",
+                         String(describing: fallback.kind)))
+            return fallback
         }
         do {
             let embedding = try await extractor.embed(PCMConvert.int16ToFloat(pcm))
@@ -59,6 +69,7 @@ actor SpeakerAttributor {
             lastIdentity[track] = id
             return id
         } catch {
+            lslog("  判定失败 [\(track.rawValue)] 抽取抛错:\(error) → unresolved")
             return .unresolved(track)
         }
     }

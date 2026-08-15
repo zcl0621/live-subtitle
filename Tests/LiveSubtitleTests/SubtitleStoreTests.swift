@@ -3,6 +3,11 @@ import XCTest
 
 @MainActor
 final class SubtitleStoreTests: XCTestCase {
+    /// 每条用例一个独立 suite —— 持久化用例之间不能互相看见对方写的键。
+    private func freshSuite() -> UserDefaults {
+        UserDefaults(suiteName: "test.ls.\(UUID().uuidString)")!
+    }
+
     func testVolatileUpsertKeepsSingleLinePerSpeaker() {
         let s = SubtitleStore()
         s.upsertVolatile(track: .system, text: "Hey")
@@ -270,6 +275,25 @@ final class SubtitleStoreTests: XCTestCase {
 
         _ = s.commitFinal(track: .mic, text: "本场第一句")     // 锚点挪到本场 → 同一刻作废
         XCTAssertTrue(s.speakerNames.isEmpty)
+    }
+
+    // MARK: - 最短判定句长(P6d)
+
+    func testMinUtteranceDefaultsToProbeValueAndPersists() {
+        let suite = freshSuite()
+        let s1 = SubtitleStore(defaults: suite)
+        XCTAssertEqual(s1.minUtteranceSeconds, SpeakerAttributor.defaultMinDuration, accuracy: 0.0001)
+        s1.minUtteranceSeconds = 3.5
+        XCTAssertEqual(SubtitleStore(defaults: suite).minUtteranceSeconds, 3.5, accuracy: 0.0001)
+    }
+
+    // 越界值(手改 plist / 旧版本 / 另一台机器同步过来)必须被夹回区间,不能直接喂给判定器
+    func testMinUtteranceIsClampedToRange() {
+        let s = SubtitleStore(defaults: freshSuite())
+        s.minUtteranceSeconds = 99
+        XCTAssertEqual(s.minUtteranceSeconds, SubtitleStore.minUtteranceRange.upperBound, accuracy: 0.0001)
+        s.minUtteranceSeconds = -5
+        XCTAssertEqual(s.minUtteranceSeconds, SubtitleStore.minUtteranceRange.lowerBound, accuracy: 0.0001)
     }
 
     // 只清一次:本场后续的改名不该被上一场遗留的「待作废」标记连坐清掉

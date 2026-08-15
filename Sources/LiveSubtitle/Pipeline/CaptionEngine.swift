@@ -49,7 +49,14 @@ final class CaptionEngine {
         self.attributor = SpeakerAttributor(extractor: Self.sharedExtractor,
                                             meProfiles: meProfiles,
                                             thresholdMe: Float(store.thresholdMe),
-                                            thresholdCluster: Float(store.thresholdCluster))
+                                            thresholdCluster: Float(store.thresholdCluster),
+                                            minDuration: store.minUtteranceSeconds)
+        lslog("""
+            ================ 开一场 ================
+            语种=\(language.rawValue) 我的声纹档案=\(meProfiles.count) 份\
+            (维度 \(meProfiles.first?.count.description ?? "-"))
+            θ_me=\(store.thresholdMe) θ_cluster=\(store.thresholdCluster) 短句下限=\(store.minUtteranceSeconds)s
+            """)
     }
 
     func start(onError: @escaping @MainActor (String) -> Void) {
@@ -60,7 +67,9 @@ final class CaptionEngine {
             do {
                 try await Self.sharedExtractor.prepare()
                 self?.attributionReady = true
+                lslog("attributionReady = true(从此刻起的终句才会判定)")
             } catch {
+                lslog("❌ 声纹模型准备失败:\(error) — 本场所有终句都不会判定")
                 onError("声纹模型准备失败:\(error.localizedDescription) — 本场说话人标注不可用,字幕不受影响")
             }
         })
@@ -95,6 +104,11 @@ final class CaptionEngine {
                                 // 模型未就绪不起 Task(免得每句白付切片 + Float 转换 + 两次
                                 // actor 跳跃只为吃个 notPrepared);就绪前的终句保持
                                 // .unresolved —— 事后补判定留作后续 polish。
+                                lslog(String(format: "终句 [%@] ready=%@ range=%@ 「%@」",
+                                             track.source.track.rawValue,
+                                             attributionReady ? "是" : "否(模型未就绪,本句不判)",
+                                             e.audioRange.map { String(format: "%.2f..%.2f(%.2fs)", $0.lowerBound, $0.upperBound, $0.upperBound - $0.lowerBound) } ?? "nil(拿不到时间轴,本句不判)",
+                                             String(e.text.prefix(40))))
                                 if attributionReady, let range = e.audioRange {
                                     let pipeline = track.pipeline
                                     let tr = track.source.track

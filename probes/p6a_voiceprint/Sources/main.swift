@@ -452,6 +452,151 @@ func cmdEnrollCheck(_ dirPath: String) async throws {
     }
 }
 
+// MARK: - P6d:短句的两条路径分别标定
+
+/// 复现 `SpeakerClusterer.update(cluster:with:)`:滑动平均后重新 L2 归一化。
+/// 必须跟线上一致 —— 簇心是被一路更新出来的,不是某一条向量,拿单条向量当簇心测出来的数没用。
+func updateCentroid(_ c: [Float], _ e: [Float], count n: Int) -> [Float] {
+    let nf = Float(n)
+    var merged = zip(c, e).map { ($0 * nf + $1) / (nf + 1) }
+    let norm = sqrt(merged.reduce(0) { $0 + $1 * $1 })
+    if norm > 0 { merged = merged.map { $0 / norm } }
+    return merged
+}
+
+/// 从语音起点起,不重叠地切出最多 `limit` 条 `secs` 秒的窗。
+func windows(_ voiced: [Float], secs: Double, limit: Int) -> [Range<Int>] {
+    let n = Int(secs * 16000)
+    var out: [Range<Int>] = []
+    var off = 0
+    while off + n <= voiced.count && out.count < limit {
+        out.append(off..<(off + n))
+        off += n
+    }
+    return out
+}
+
+/// 建议阈值:同人最低与异人最高的中点,吸附到设置页的 0.05 档距。
+func suggestThreshold(sameMin: Float, crossMax: Float) -> Float {
+    (((sameMin + crossMax) / 2) / 0.05).rounded() * 0.05
+}
+
+/// P6d:Task 10 真机日志显示 18 条终句只有 4 条够 4.0s —— 78% 的行走的是「沿用上次身份」。
+/// 但同一份日志里簇内余弦 0.708–0.760、簇间 −0.023,间隔大得离谱,说明 4.0s 对**簇路径**
+/// 明显过保守。P6c 只测了 3s/5s/10s 且只测了注册档案那条路,这里把两条路都往短里扫。
+///
+/// 两条路径的区别是这次标定的全部意义:
+///   路径 A(θ_me)  :注册档案(多窗平均,≥15s 朗读) × 短句
+///   路径 B(θ_cluster):会话簇心(几条长句滑动平均出来的) × 短句
+/// 线上它们共用一个 minDuration,而分布未必一样 —— 一样就合并,不一样就该拆。
+func cmdShortCheck(_ dirPath: String) async throws {
+    let samples = try enumerateSamples(URL(fileURLWithPath: dirPath, isDirectory: true))
+    let (lean, maskFrames, _) = try makeLeanExtractor()
+    let durations: [Double] = [1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0]
+
+    print("== P6d:短句判定的两条路径分别标定 ==")
+    print("每人第 1 个 clip 建【注册档案】与【簇心】,其余 clip 出测试短句(不自我匹配)")
+    print("簇心建法与线上一致:5s 窗 ×3 滑动平均 + 重归一化\n")
+
+    struct Group {
+        let person: String, lang: String
+        let enroll: [Float]          // 路径 A 的比对方
+        let centroid: [Float]        // 路径 B 的比对方
+        var probes: [Double: [[Float]]] = [:]   // 句长 → 该人的测试短句向量
+    }
+
+    // 按 (人, 语言) 分组
+    var byKey: [String: [Sample]] = [:]
+    for s in samples { byKey["\(s.person)_\(s.lang)", default: []].append(s) }
+
+    var groups: [Group] = []
+    for (key, clips) in byKey.sorted(by: { $0.key < $1.key }) {
+        guard clips.count >= 2 else {
+            print("跳过 \(key):只有 \(clips.count) 个 clip,无法做「建心用一段、测试用另一段」")
+            continue
+        }
+        let base = Array(try loadAudio(clips[0].url).drop(while: { _ in false }))
+        let baseVoiced = Array(base[speechStart(base)...])
+        guard baseVoiced.count >= 160_000 else { print("跳过 \(key):首个 clip 修剪后不足 10s"); continue }
+
+        let enroll = try enrollEmbedding(baseVoiced, lean, maskFrames)
+        // 簇心:模拟会话里头几条够长的终句依次进来
+        var centroid: [Float] = []
+        var count = 0
+        for r in windows(baseVoiced, secs: 5.0, limit: 3) {
+            let e = try leanEmbedF(lean, maskFrames: maskFrames, audio: Array(baseVoiced[r]))
+            if centroid.isEmpty { centroid = e; count = 1 }
+            else { centroid = updateCentroid(centroid, e, count: count); count += 1 }
+        }
+        guard !centroid.isEmpty else { print("跳过 \(key):建不出簇心"); continue }
+
+        var g = Group(person: clips[0].person, lang: clips[0].lang, enroll: enroll, centroid: centroid)
+        for secs in durations {
+            var vecs: [[Float]] = []
+            for clip in clips.dropFirst() {
+                let a = try loadAudio(clip.url)
+                let v = Array(a[speechStart(a)...])
+                for r in windows(v, secs: secs, limit: 3) where vecs.count < 6 {
+                    vecs.append(try leanEmbedF(lean, maskFrames: maskFrames, audio: Array(v[r])))
+                }
+            }
+            g.probes[secs] = vecs
+        }
+        groups.append(g)
+        print("  \(key):簇心用 \(count) 窗;测试短句 \(durations.map { "\(Int($0 * 10))" }.joined(separator: "/")) 各 \(g.probes[1.0]?.count ?? 0) 条")
+    }
+    guard groups.count >= 2 else { throw ProbeError("可用分组不足 2 个,无法比异人") }
+
+    for (name, keyPath) in [("A  注册档案 × 短句(θ_me 这条路)", \Group.enroll),
+                            ("B  会话簇心 × 短句(θ_cluster 这条路)", \Group.centroid)] {
+        print("\n\n════════ 路径 \(name) ════════")
+        // 注意:Swift 的 String(format:) 里 %s 是 C 字符串,喂 Swift String 会出乱码 —— 一律手工补齐
+        func pad(_ s: String, _ n: Int) -> String { s + String(repeating: " ", count: max(0, n - s.count)) }
+        print(pad("句长", 7) + pad("同人(min/中位/max)", 34) + pad("异人(min/中位/max)", 34) + pad("间隔", 9) + "建议θ")
+        for secs in durations {
+            var same: [Float] = [], cross: [Float] = []
+            for a in groups {
+                for b in groups {
+                    guard a.lang == b.lang else { continue }   // 不跨语言匹配(用户约束)
+                    for v in b.probes[secs] ?? [] {
+                        let c = cosine(a[keyPath: keyPath], v)
+                        if a.person == b.person { same.append(c) } else { cross.append(c) }
+                    }
+                }
+            }
+            guard let sMin = same.min(), let cMax = cross.max() else { continue }
+            let gap = sMin - cMax
+            let th = suggestThreshold(sameMin: sMin, crossMax: cMax)
+            print(pad(String(format: "%.1fs", secs), 7)
+                  + pad(stats(same), 34) + pad(stats(cross), 34)
+                  + pad(String(format: "%+.3f %@", gap, gap > 0 ? "✅" : "❌"), 9)
+                  + (gap > 0 ? String(format: "  %.2f", th) : "  不可分"))
+        }
+    }
+
+    // 现行默认值在各句长下的表现 —— 直接回答「4.0s 能不能降」
+    print("\n\n════════ 现行默认值(θ_me=0.60 / θ_cluster=0.50)在各句长下会不会出错 ════════")
+    for secs in durations {
+        var meFP = 0, meFN = 0, clFP = 0, clFN = 0, nSame = 0, nCross = 0
+        for a in groups {
+            for b in groups {
+                guard a.lang == b.lang else { continue }
+                for v in b.probes[secs] ?? [] {
+                    let sameP = a.person == b.person
+                    if sameP { nSame += 1 } else { nCross += 1 }
+                    let mc = cosine(a.enroll, v), cc = cosine(a.centroid, v)
+                    if sameP { if mc < 0.60 { meFN += 1 }; if cc < 0.50 { clFN += 1 } }
+                    else { if mc >= 0.60 { meFP += 1 }; if cc >= 0.50 { clFP += 1 } }
+                }
+            }
+        }
+        print(String(format: "%.1fs  θ_me:漏判自己 %d/%d、把别人认成我 %d/%d   │  θ_cluster:同人被拆开 %d/%d、异人被并 %d/%d",
+                     secs, meFN, nSame, meFP, nCross, clFN, nSame, clFP, nCross))
+    }
+    print("\n判读:『把别人认成我』和『异人被并』是硬错(必须为 0);")
+    print("     『漏判自己』『同人被拆开』是软错(退化成多一个说话人,可接受)。")
+}
+
 // MARK: - 目录大小小工具
 
 extension FileManager {
@@ -489,6 +634,7 @@ do {
     case "matrix" where args.count >= 3: try await cmdMatrix(args[2])
     case "decay" where args.count >= 3: try await cmdDecay(args[2])
     case "enrollcheck" where args.count >= 3: try await cmdEnrollCheck(args[2])
+    case "shortcheck" where args.count >= 3: try await cmdShortCheck(args[2])
     case "trim" where args.count >= 6:
         try cmdTrim(args[2], args[3], start: Double(args[4]) ?? 0, dur: Double(args[5]) ?? 30)
     default: usage()

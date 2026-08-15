@@ -65,19 +65,27 @@ actor FluidAudioExtractor: VoiceprintExtractor {
     }
 
     private func doPrepare() async throws {
+        let t0 = Date()
+        let dir = DiarizerModels.defaultModelsDirectory()
+        lslog("prepare 开始:modelsDir=\(dir.path)")
         // 模型已在盘上就不走 downloadIfNeeded —— 它除了下载还会把两个模型
         // 都载进内存,稳态启动没必要付这份加载
-        if Self.findModel(
-            named: ModelNames.Diarizer.embeddingFile,
-            under: DiarizerModels.defaultModelsDirectory()) == nil {
+        let preexisting = Self.findModel(named: ModelNames.Diarizer.embeddingFile, under: dir)
+        if let preexisting {
+            lslog("prepare:盘上已有模型,跳过下载 → \(preexisting.path)")
+        } else {
+            lslog("prepare:盘上找不到模型,开始下载…")
             _ = try await DiarizerModels.downloadIfNeeded()
+            lslog(String(format: "prepare:下载结束,耗时 %.1fs", Date().timeIntervalSince(t0)))
         }
 
         guard
-            let modelURL = Self.findModel(
-                named: ModelNames.Diarizer.embeddingFile,
-                under: DiarizerModels.defaultModelsDirectory())
-        else { throw ExtractError.badModel }
+            let modelURL = preexisting
+                ?? Self.findModel(named: ModelNames.Diarizer.embeddingFile, under: dir)
+        else {
+            lslog("prepare:❌ 下载后仍找不到模型 → badModel")
+            throw ExtractError.badModel
+        }
 
         let config = MLModelConfiguration()
         config.computeUnits = .all
@@ -101,6 +109,7 @@ actor FluidAudioExtractor: VoiceprintExtractor {
 
         self.extractor = ex
         self.maskFrames = frames
+        lslog(String(format: "prepare:✅ 就绪 maskFrames=%d 总耗时 %.1fs", frames, Date().timeIntervalSince(t0)))
     }
 
     func embed(_ samples: [Float]) async throws -> [Float] {

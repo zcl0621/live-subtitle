@@ -35,6 +35,25 @@ final class SubtitleStore {
     static let defaultThresholdMe = Double(SpeakerAttributor.defaultThresholdMe)
     static let defaultThresholdCluster = Double(SpeakerAttributor.defaultThresholdCluster)
 
+    /// 判定的最短句长。区间上下沿按 P6d 扫过的档位取(1.0 已明显退化、6.0 已远超饱和点)。
+    static let minUtteranceRange: ClosedRange<Double> = 1.0...6.0
+    static let minUtteranceStep: Double = 0.5
+    static let defaultMinUtterance = SpeakerAttributor.defaultMinDuration
+
+    /// 短于此秒数的终句不跑声纹,沿用该轨上一句的身份。
+    /// **调它换的是「覆盖率 vs 簇爆炸」,不是「准不准」** —— P6d 实测异人余弦最高 0.404,
+    /// 任何句长下都够不着阈值,所以调低只会让同一个人更容易被拆成两个「说话人 N」,
+    /// 不会把别人认成你。调高则更多句子退回「沿用上一句身份」(那才是真机上最主要的误差来源)。
+    /// 与两个阈值一样只在【下一场】生效。
+    var minUtteranceSeconds: Double {
+        didSet {
+            let v = min(max(minUtteranceSeconds, Self.minUtteranceRange.lowerBound),
+                        Self.minUtteranceRange.upperBound)
+            if v != minUtteranceSeconds { minUtteranceSeconds = v }
+            defaults.set(minUtteranceSeconds, forKey: "ls.minUtterance")
+        }
+    }
+
     /// θ_me:与「我」的档案余弦 ≥ 此值即判定为「我」。调低 = 更容易认成「我」。
     /// 只在【下一场】生效:SpeakerAttributor 在 CaptionEngine.init 那一刻按它构建
     /// (UI 侧运行中把滑杆置灰,语义与语种 Picker 一致)。
@@ -140,6 +159,9 @@ final class SubtitleStore {
             cluster: defaults.object(forKey: "ls.thresholdCluster") as? Double ?? Self.defaultThresholdCluster)
         thresholdMe = normalized.me
         thresholdCluster = normalized.cluster
+        let storedMin = defaults.object(forKey: "ls.minUtterance") as? Double ?? Self.defaultMinUtterance
+        minUtteranceSeconds = min(max(storedMin, Self.minUtteranceRange.lowerBound),
+                                  Self.minUtteranceRange.upperBound)
         sessionLanguage = language      // 未开过字幕时,"本场"就等于设置
         layoutEditing = false
         isRunning = false
