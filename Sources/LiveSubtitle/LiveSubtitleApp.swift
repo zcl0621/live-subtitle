@@ -6,7 +6,6 @@ struct LiveSubtitleApp: App {
     @State private var store = SubtitleStore()
     @State private var engine: CaptionEngine?
     @State private var overlay = OverlayController()
-    @State private var running = false
     @State private var status = ""
     @State private var exportStatus = ""
     @State private var isExporting = false
@@ -29,7 +28,7 @@ struct LiveSubtitleApp: App {
     @ViewBuilder private var controlPanel: some View {
         @Bindable var s = store
         VStack(alignment: .leading, spacing: 12) {
-            Button(running ? "停止字幕" : "开始字幕") { toggle() }
+            Button(store.isRunning ? "停止字幕" : "开始字幕") { toggle() }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .frame(maxWidth: .infinity)
@@ -43,7 +42,15 @@ struct LiveSubtitleApp: App {
                 Text("原文").tag(DisplayMode.originalOnly)
                 Text("双语").tag(DisplayMode.both)
                 Text("译文").tag(DisplayMode.translatedOnly)
-            }.pickerStyle(.segmented)
+            }
+            .pickerStyle(.segmented)
+            // 中文会议不产译文,三个选项都只会显示原文 —— 死控件,置灰并说明原因。
+            .disabled(!displayModeSelectable)
+            if !displayModeSelectable {
+                Text("中文会议无译文,显示模式无从选起。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Picker("形态", selection: $s.overlayMode) {
                 Text("字幕条").tag(OverlayMode.bar)
                 Text("小窗").tag(OverlayMode.mini)
@@ -73,6 +80,16 @@ struct LiveSubtitleApp: App {
         }
         .padding(16)
         .frame(width: 300)
+    }
+
+    /// 显示模式这组选项此刻有没有意义。**运行中看本场事实,没跑时看下一场设置** ——
+    /// 两个语种字段各管一段时间:`sessionLanguage` 只在 `beginSession` 写,只跑时才是真相;
+    /// 停着的时候它还停在上一场(或启动时的默认值)上,拿它门控就会出这个岔子:
+    /// 上次开的是中文会议 → 重启后 Picker 灰着 → 用户去设置页改成 English → Picker 依然灰,
+    /// 非得先开一次字幕才解锁,而这时候他早就想先把「双语」选好了。
+    private var displayModeSelectable: Bool {
+        store.isRunning ? store.sessionLanguage.needsTranslation
+                        : store.meetingLanguage.needsTranslation
     }
 
     /// 带右侧数值的紧凑滑块行(.window 样式下 Slider 正常可用)。
@@ -105,8 +122,8 @@ struct LiveSubtitleApp: App {
     }
 
     @MainActor private func toggle() {
-        if running {
-            engine?.stop(); engine = nil; overlay.hide(); running = false; status = ""
+        if store.isRunning {
+            engine?.stop(); engine = nil; overlay.hide(); store.isRunning = false; status = ""
         } else {
             // 权限在此刻(真正要用时)请求,不在启动时。
             // 启动阶段同时拉起麦克风 + 屏幕录制两个 TCC 流程会导致 MenuBarExtra 的状态栏项建不出来
@@ -116,7 +133,7 @@ struct LiveSubtitleApp: App {
             engine = e
             overlay.show(store: store)
             e.start(onError: { status = $0 })
-            running = true
+            store.isRunning = true
         }
     }
 }

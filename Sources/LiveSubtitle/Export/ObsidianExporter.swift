@@ -24,13 +24,34 @@ enum ObsidianExporter {
         }
     }
 
+    /// 一次导出只收【最后一场产出终句的会议】的行。
+    ///
+    /// `lines` 跨会话不清空(理由见 `SubtitleStore.beginSession`),而一次会议 = 一篇笔记:
+    /// 混进上一场会写出三种错 —— 上一场英文会议的 ` — 译文` 尾巴混进中文会议的笔记;
+    /// 下一场是全新 `SpeakerClusterer`(簇号从 0 重编),两场的「说话人 2」根本不是同一个人;
+    /// 改名映射也只对本场有效 —— 且它作废的时刻就钉在本函数的锚点上
+    /// (`SubtitleStore.renamesPendingExpiry`:本场第一条终句既挪锚点,也让上一场的改名失效)。
+    ///
+    /// 锚点取【最后一条终句】而非最后一行:新会议刚开、只有灰字中间态时,
+    /// 该导出的仍是上一场那批终句,而不是"本场 0 行"。
+    /// 用 filter 而非取尾部连续段,是不指望"同场的行一定连续"这条隐含前提。
+    static func lastSessionLines(_ lines: [SubtitleLine]) -> [SubtitleLine] {
+        guard let sessionID = lines.last(where: { $0.isFinal })?.sessionID else { return [] }
+        return lines.filter { $0.sessionID == sessionID }
+    }
+
     /// 从字幕行生成转录 markdown(只收 isFinal 的行)。
-    /// 每行: "- **我/对方**:原文" 若有译文再 " — 译文"。
-    static func transcriptMarkdown(from lines: [SubtitleLine]) -> String {
+    /// 每行: "- **我 / 张三 / 说话人 2**:原文",有译文再接 " — 译文";
+    /// 中文会议不产译文,行退化成 "- **说话人 1**:中文原文",不留空的 ` — ` 尾巴。
+    ///
+    /// 说话人名与屏上同源:`SpeakerID.displayName(overrides:)` + store 的改名映射
+    /// (`speakerNames`),不再按轨压回「我/对方」——否则同一份数据会出现两套说法。
+    static func transcriptMarkdown(from lines: [SubtitleLine],
+                                   speakerNames: [SpeakerID.Kind: String] = [:]) -> String {
         lines
             .filter { $0.isFinal }
             .map { line in
-                let speaker = displayName(for: line.speaker)
+                let speaker = line.speaker.displayName(overrides: speakerNames)
                 var row = "- **\(speaker)**:\(line.original)"
                 if let translated = line.translated,
                    !translated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -77,13 +98,6 @@ enum ObsidianExporter {
     }
 
     // MARK: - Helpers
-
-    private static func displayName(for speaker: Speaker) -> String {
-        switch speaker {
-        case .me: return "我"
-        case .other: return "对方"
-        }
-    }
 
     private static func sanitize(_ title: String) -> String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)

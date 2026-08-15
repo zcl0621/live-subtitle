@@ -5,7 +5,7 @@ import CoreMedia
 
 /// 用 ScreenCaptureKit 采集系统输出音频(纯系统声,不含麦克风)。
 final class SystemAudioSource: NSObject, AudioSource, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
-    let speaker: Speaker = .other
+    let track: Track = .system
     /// 采集启动失败(多为未授权『屏幕录制』)时上报;由 CaptionEngine 接到 UI。
     var onError: (@Sendable (String) -> Void)?
     private let converter = FormatConverter()
@@ -52,7 +52,7 @@ final class SystemAudioSource: NSObject, AudioSource, SCStreamOutput, SCStreamDe
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio, let pcm = Self.pcmBuffer(from: sampleBuffer) else { return }
         guard let samples = try? converter.convert(pcm) else { return }
-        continuation?.yield(AudioFrame(pcm: samples, speaker: .other, hostTime: mach_absolute_time()))
+        continuation?.yield(AudioFrame(pcm: samples, track: .system, hostTime: mach_absolute_time()))
     }
 
     func stop() async {

@@ -12,8 +12,12 @@ import CoreGraphics
 enum PermissionsManager {
     /// 在真正要用权限时调用(点「开始字幕」)。非阻塞:两项各自异步触发系统授权框,忽略结果。
     static func requestAll() {
-        // ① 麦克风:异步弹权限框,不关心结果。
-        AVCaptureDevice.requestAccess(for: .audio) { _ in }
+        // ① 麦克风:只在「未决」时请求。已授权/已拒绝时 requestAccess 本就不弹框,
+        // 显式跳过是为了让「到底是谁在弹权限框」这件事在代码上一目了然
+        // —— 2026-08-15 排查「每次启动弹很多次」时,分不清请求来源是最大的障碍。
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            AVCaptureDevice.requestAccess(for: .audio) { _ in }
+        }
 
         // ② 屏幕录制(系统音频采集依赖此授权)。
         // 仅在尚未授权时触发系统授权引导。CGRequestScreenCaptureAccess 是同步阻塞的
@@ -22,6 +26,21 @@ enum PermissionsManager {
             DispatchQueue.global().async {
                 _ = CGRequestScreenCaptureAccess()
             }
+        }
+    }
+
+    /// **只**要麦克风,不碰屏幕录制 —— 设置页录声纹用。
+    /// 单独一条而不是复用 `requestAll()`:那条会连带拉起屏幕录制授权,
+    /// 而录声纹跟屏幕录制毫无关系,凭空多弹一个吓人的授权框;
+    /// 且上面那条注释记的「两个 TCC 流程同时拉起」的坑正是要躲开的。
+    ///
+    /// 返回是否已授权。已被拒绝时返回 false —— 系统不会再弹框,调用方必须给出
+    /// 「去系统设置里勾」的可操作提示,而不是干等一个永远不来的授权。
+    static func requestMicrophone() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: true
+        case .notDetermined: await AVCaptureDevice.requestAccess(for: .audio)
+        default: false      // .denied / .restricted,以及将来新增的状态
         }
     }
 }

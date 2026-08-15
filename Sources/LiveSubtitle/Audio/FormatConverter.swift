@@ -36,4 +36,17 @@ final class FormatConverter {
     }
 
     enum ConvertError: Error { case cannotCreate, cannotAllocate }
+
+    /// 取 0 声道为单声道 buffer(兜底任意声道数;AVAudioEngine 输入节点通常是 Float32 非交织)。
+    /// 不显式取 0 声道直接丢给 AVAudioConverter 的话,多声道输入会转出静音
+    /// —— 麦克风采集与设置页录声纹两条路径共用这一手,别只在其中一处修。
+    static func channelZeroMono(_ buf: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        guard let src = buf.floatChannelData,
+              let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                                      sampleRate: buf.format.sampleRate, channels: 1, interleaved: false),
+              let out = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: buf.frameLength) else { return nil }
+        out.frameLength = buf.frameLength
+        out.floatChannelData![0].update(from: src[0], count: Int(buf.frameLength))
+        return out
+    }
 }
