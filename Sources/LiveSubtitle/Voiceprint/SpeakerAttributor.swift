@@ -65,9 +65,20 @@ actor SpeakerAttributor {
         }
         do {
             let embedding = try await extractor.embed(PCMConvert.int16ToFloat(pcm))
-            let id = clusterer.assign(embedding, track: track)
-            lastIdentity[track] = id
-            return id
+            switch clusterer.assign(embedding) {
+            case .me:
+                let id = SpeakerID(track: track, kind: .me)
+                lastIdentity[track] = id
+                return id
+            case .cluster(let i):
+                let id = SpeakerID(track: track, kind: .cluster(i))
+                lastIdentity[track] = id
+                return id
+            case .uncertain:
+                // 死区。**故意不写 lastIdentity**:这一句没提供可信证据,不该成为
+                // 后续短句沿用的依据 —— 沿用的应该始终是最后一次「判准了」的身份。
+                return lastIdentity[track] ?? .unresolved(track)
+            }
         } catch {
             lslog("  判定失败 [\(track.rawValue)] 抽取抛错:\(error) → unresolved")
             return .unresolved(track)

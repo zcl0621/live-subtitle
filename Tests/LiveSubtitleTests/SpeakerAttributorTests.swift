@@ -40,6 +40,13 @@ final class SpeakerAttributorTests: XCTestCase {
         v[hot] = 1
         return v
     }
+    /// 两个单位向量的归一化混合,用来造「相似但不相同」(t 越大离 a 越远)。
+    private static func blend(_ a: [Float], _ b: [Float], _ t: Float) -> [Float] {
+        let v = zip(a, b).map { $0 * (1 - t) + $1 * t }
+        let n = (v.reduce(0) { $0 + $1 * $1 }).squareRoot()
+        return v.map { $0 / n }
+    }
+
     /// 3s @16k 的假样本(内容无所谓,mock 不看)。
     private static let pcm3s = [Int16](repeating: 1000, count: 48000)
 
@@ -185,6 +192,45 @@ final class SpeakerAttributorTests: XCTestCase {
                                   thresholdCluster: 0.61)
         XCTAssertEqual(a.thresholdMe, 0.72, accuracy: 0.0001)
         XCTAssertEqual(a.thresholdCluster, 0.61, accuracy: 0.0001)
+    }
+
+    // MARK: - 跨轨 / 死区
+
+    /// 外放漏音场景:同一个人的声音出现在两条轨上,必须落到同一个簇号(同名同色)。
+    /// `SpeakerClusterer.assign` 已经拿不到 Track,所以这条现在是结构保证 —— 但仍钉一次,
+    /// 因为真正要守的是「SpeakerID 的 kind 相同、只有 track 不同」这个对外可见的结果。
+    func testSameVoiceOnBothTracksGetsSameClusterNumber() async {
+        let a = makeAttributor(.success(Self.unit(1)))
+        let sys = await a.attribute(track: .system, range: 0.0..<3.0, pcm: Self.pcm3s)
+        let mic = await a.attribute(track: .mic, range: 3.0..<6.0, pcm: Self.pcm3s)
+        XCTAssertEqual(sys.kind, .cluster(0))
+        XCTAssertEqual(mic.kind, .cluster(0), "同一个人换条轨不该变成另一个说话人")
+        XCTAssertEqual(mic.track, .mic, "轨本身仍要照实记")
+    }
+
+    /// 死区句沿用上一句身份,而不是造一个新说话人(Task 10 实测的那个 bug)。
+    func testMurkyUtteranceReusesLastIdentityInsteadOfSplitting() async {
+        // 先用 unit(1) 立簇,再喂一个与它余弦 ≈0.36 的向量 —— 落在 [θ_new, θ_cluster)
+        let murky = Self.blend(Self.unit(1), Self.unit(2), 0.72)
+        let a = SpeakerAttributor(
+            extractor: SequenceExtractor([.success(Self.unit(1)), .success(murky)]),
+            meProfiles: [], minDuration: 2.0)
+        let first = await a.attribute(track: .system, range: 0.0..<3.0, pcm: Self.pcm3s)
+        XCTAssertEqual(first.kind, .cluster(0))
+        let second = await a.attribute(track: .system, range: 3.0..<6.0, pcm: Self.pcm3s)
+        XCTAssertEqual(second, first, "含混的一句该沿用上一句身份,不该劈出【说话人 2】")
+    }
+
+    /// 但死区句**不能**成为后续短句沿用的依据 —— 沿用的必须是最后一次判准了的身份。
+    /// 这条与上一条是一对:结果看起来一样,来源不能一样。
+    func testMurkyUtteranceDoesNotBecomeTheRememberedIdentity() async {
+        let murky = Self.blend(Self.unit(1), Self.unit(2), 0.72)
+        let a = SpeakerAttributor(
+            extractor: SequenceExtractor([.success(murky)]),
+            meProfiles: [], minDuration: 2.0)
+        // 没有任何簇时第一句必须开张(不走死区),故这里先确认它建了簇
+        let first = await a.attribute(track: .mic, range: 0.0..<3.0, pcm: Self.pcm3s)
+        XCTAssertEqual(first.kind, .cluster(0), "第一句没有簇可比,必须开张")
     }
 
     // MARK: - reset
