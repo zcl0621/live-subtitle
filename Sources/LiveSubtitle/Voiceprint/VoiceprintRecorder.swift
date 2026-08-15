@@ -9,11 +9,15 @@ import Observation
 /// 采集回调在音频线程,通过 `AsyncStream`(其 continuation 是 Sendable)把
 /// 已转换好的 `[Int16]` 送回 MainActor 累积,所以本类不必标 @unchecked Sendable。
 ///
-/// ⚠️ 但别把这读成「编译器证明了这条路径线程安全」:tap 闭包里仍然握着一个非 Sendable 的
-/// `FormatConverter`,并在音频线程上调它。这段能编过只是因为 SDK 里的
-/// `AVAudioNodeTapBlock` 没标 @Sendable,并发检查压根没看这里。安全性靠的是约定:
-/// 该 converter 每次录制新建、只被这一个 tap 闭包持有、除音频线程外无人碰它。
-/// 改动这块时要自己守住这条约定,编译器不会拦你。
+/// ⚠️ 两件事别记反(第一条曾经在这儿写反过,代价是真机上点「录制」必崩):
+///
+/// 1. **编译器确实看了这里,而且比你想的更主动。** tap 闭包若在本类的 MainActor 隔离方法里
+///    形成,会被推断成 MainActor 隔离的,编译器随即在闭包入口插一次运行时执行器断言;
+///    AVAudioEngine 在音频线程上调它,断言必炸(SIGTRAP)。所以装 tap 走
+///    `installTap(on:format:converter:cont:)` 那个 `nonisolated` 静态函数 —— 理由写在它头上。
+/// 2. **但它没帮你管数据竞争。** 闭包握着的 `FormatConverter` 是非 Sendable 的,
+///    `AVAudioNodeTapBlock` 没标 @Sendable 所以捕获检查不生效。安全性靠约定:该 converter
+///    每次录制新建、只被这一个 tap 闭包持有、除音频线程外无人碰它。改这块时自己守住。
 @MainActor
 @Observable
 final class VoiceprintRecorder {
@@ -265,11 +269,7 @@ final class VoiceprintRecorder {
         continuation = cont
         // 每次录制新建转换器:AVAudioConverter 与源格式绑定,换设备后不能复用。
         let converter = FormatConverter()
-        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buf, _ in
-            guard let mono = FormatConverter.channelZeroMono(buf),
-                  let pcm = try? converter.convert(mono) else { return }
-            cont.yield(pcm)
-        }
+        Self.installTap(on: input, format: format, converter: converter, cont: cont)
         captureActive = true
         engine.prepare()
         do {
@@ -283,6 +283,30 @@ final class VoiceprintRecorder {
         }
         consumeTask = Task { @MainActor [weak self] in
             for await chunk in stream { self?.ingest(chunk) }
+        }
+    }
+
+    /// 装 tap。**`nonisolated` 是这个函数存在的全部理由,别把它内联回 `beginCapture()`。**
+    ///
+    /// 本类是 `@MainActor`,在它的隔离方法里写出来的闭包会被推断成 MainActor 隔离的
+    /// (`AVAudioNodeTapBlock` 没标 `@Sendable`,拦不住这层推断)。编译器于是在闭包入口插了一次
+    /// 运行时执行器断言 —— 而 AVAudioEngine 是在音频线程(`RealtimeMessenger.mServiceQueue`)上调它的,
+    /// 断言当场 `dispatch_assert_queue_fail` → SIGTRAP。真机上点「录制」必崩,栈顶就是
+    /// `swift_task_checkIsolatedSwift` ← `closure #1 in VoiceprintRecorder.beginCapture()`。
+    ///
+    /// `MicSource` 同样的写法不崩,只因为那个类不是 `@MainActor`,闭包天然 nonisolated。
+    /// 挪进 `nonisolated` 函数就是把闭包放回同一个位置:没有 actor 上下文 → 不插断言。
+    ///
+    /// (捕获的 `converter` 是非 Sendable 的,这里靠的仍是约定而非编译器:它每次录制新建、
+    /// 只被这一个 tap 闭包持有、除音频线程外无人碰。改这块时自己守住。)
+    private nonisolated static func installTap(on input: AVAudioInputNode,
+                                               format: AVAudioFormat,
+                                               converter: FormatConverter,
+                                               cont: AsyncStream<[Int16]>.Continuation) {
+        input.installTap(onBus: 0, bufferSize: 1024, format: format) { buf, _ in
+            guard let mono = FormatConverter.channelZeroMono(buf),
+                  let pcm = try? converter.convert(mono) else { return }
+            cont.yield(pcm)
         }
     }
 
